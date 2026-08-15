@@ -1,0 +1,2909 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Four.meme Bot — 实时监控</title>
+<script src="/socket.io/socket.io.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+ :root {
+ --bg: #0b0f14;
+ --surface: #111821;
+ --surface2: #161f2b;
+ --border: #26344a;
+ --accent: #22c55e;
+ --accent2: #3b82f6;
+ --sell1: #f59e0b;
+ --sell2: #ef4444;
+ --text: #e5edf5;
+ --muted: #7b8ca0;
+ --prog: #34d399;
+ --mono: 'Inter', 'DIN Alternate', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+ --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+ }
+
+ * { margin: 0; padding: 0; box-sizing: border-box; }
+
+ body {
+ background: var(--bg);
+ color: var(--text);
+ font-family: var(--sans);
+ font-size: 13px;
+ min-height: 100vh;
+ overflow-x: hidden;
+ -webkit-font-smoothing: antialiased;
+ -moz-osx-font-smoothing: grayscale;
+ }
+
+ body::before {
+ content: '';
+ position: fixed;
+ inset: 0;
+ background-image: linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
+ linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px);
+ background-size: 48px 48px;
+ pointer-events: none;
+ z-index: 0;
+ }
+
+ header {
+ position: sticky;
+ top: 0;
+ z-index: 100;
+ background: rgba(11,15,20,.95);
+ backdrop-filter: blur(10px);
+ border-bottom: 1px solid var(--border);
+ padding: 0 24px;
+ height: 70px;
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 20px;
+ }
+
+ .logo {
+ font-family: var(--sans);
+ font-weight: 700;
+ font-size: 16px;
+ letter-spacing: 0;
+ display: flex;
+ align-items: center;
+ gap: 10px;
+ color: var(--text);
+ }
+
+ .logo-dot {
+ width: 8px; height: 8px;
+ border-radius: 50%;
+ background: #33bbee;
+ animation: pulse 2s infinite;
+ }
+
+ @keyframes pulse {
+ 0%,100% { opacity: 1; }
+ 50% { opacity: .5; }
+ }
+
+ .header-stats {
+ display: flex;
+ gap: 28px;
+ align-items: center;
+ }
+
+ .hstat { display: flex; flex-direction: column; align-items: flex-end; }
+ .hstat-label { font-size: 11px; color: var(--muted); text-transform: none; letter-spacing: 0; }
+ .hstat-val { font-family: var(--mono); font-size: 14px; color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+ .hstat-val.warn { color: var(--sell1); }
+ .hstat-val.blue { color: var(--accent2); }
+
+ .ws-badges { display: flex; gap: 8px; align-items: center; }
+ .ws-badge {
+ font-family: var(--mono);
+ font-size: 10px;
+ padding: 3px 9px;
+ border-radius: 20px;
+ border: 1px solid var(--accent);
+ color: var(--accent);
+ display: flex;
+ align-items: center;
+ gap: 5px;
+ white-space: nowrap;
+ }
+ .ws-badge.chain-badge { border-color: #a0b4c8; color: #a0b4c8; }
+ .ws-badge.fm-badge { border-color: #33bbee; color: #33bbee; }
+ .ws-badge.offline { border-color: var(--sell2); color: var(--sell2); }
+ .ws-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.5s infinite; }
+
+ .layout { display: flex; flex-direction: column; height: calc(100vh - 70px); }
+ .left-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+ .tabs {
+ display: flex;
+ border-bottom: 1px solid var(--border);
+ background: var(--surface);
+ flex-shrink: 0;
+ }
+
+ .tab {
+ padding: 0 18px;
+ height: 60px;
+ line-height: 60px;
+ font-size: 12px;
+ font-weight: 600;
+ letter-spacing: 0;
+ text-transform: none;
+ cursor: pointer;
+ color: var(--muted);
+ border-bottom: 2px solid transparent;
+ transition: all .2s;
+ display: flex;
+ align-items: center;
+ gap: 8px;
+ }
+
+ .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+ .tab:hover:not(.active) { color: var(--text); }
+
+ .tab-badge {
+ background: transparent;
+ border: none;
+ border-radius: 0;
+ padding: 0 0 0 4px;
+ font-size: 11px;
+ font-family: var(--mono);
+ color: var(--muted);
+ }
+
+ .tab.active .tab-badge { background: transparent; border: none; color: var(--accent); }
+
+ .tab-content { flex: 1; overflow: hidden; display: none; flex-direction: column; }
+ .tab-content.active { display: flex; }
+
+ .table-wrap { flex: 1; overflow-y: auto; overflow-x: auto; padding: 0; }
+
+ table {
+ width: 100%;
+ border-collapse: collapse;
+ min-width: 600px;
+ table-layout: fixed;
+ }
+
+
+ /* ── 固定 DIV 表头（全宽覆盖，无左右缝隙）── */
+ .table-col-header {
+   display: flex;
+   flex-shrink: 0;
+   height: 60px;
+   background: var(--surface);
+   border-bottom: 1px solid var(--border);
+   align-items: center;
+   font-size: 11px;
+   font-weight: 600;
+   color: var(--muted);
+   letter-spacing: .5px;
+   white-space: nowrap;
+   padding: 0 16px;
+   box-sizing: border-box;
+   width: 100%;
+   overflow: hidden;
+ }
+ /* 各列宽与 table col-* 对齐 */
+ .th-token  { width: 184px; flex-shrink: 0; border-right: 1px solid rgba(38,52,74,0.5); align-self: stretch; display: flex; align-items: center; justify-content: center; }
+ .th-media  { width: 400px; flex-shrink: 0; border-left: 1px solid rgba(38,52,74,0.5); align-self: stretch; display: flex; align-items: center; justify-content: center; }
+ .th-mc     { flex: 1; min-width: 200px; border-left: 1px solid rgba(38,52,74,0.5); align-self: stretch; display: flex; align-items: center; justify-content: center; }
+ .th-signal { width: 300px; flex-shrink: 0; border-left: 1px solid var(--border); border-right: 1px solid var(--border); align-self: stretch; display: flex; align-items: center; justify-content: center; }
+ .th-buy    { width: 450px; flex-shrink: 0; border-left: 1px solid rgba(38,52,74,0.5); align-self: stretch; display: flex; align-items: center; justify-content: center; }
+
+ tbody tr { border-bottom: 1px solid rgba(26,45,71,.5); transition: background .15s; height: 160px; max-height: 160px; overflow: hidden; }
+ /* mc-cell td fills full row height so K-line + trades fill it completely */
+ td.col-mc { padding: 0 !important; height: 160px; max-height: 160px; vertical-align: top; overflow: hidden; }
+ /* signal column td also top-aligned, no extra padding */
+ td.col-signal { padding: 0 !important; height: 160px; max-height: 160px; vertical-align: top; overflow: hidden; }
+ #wm-table tbody tr { height: auto; min-height: 44px; }
+ #tab-trade tbody tr { height: 160px; max-height: 160px; overflow: hidden; }
+ tbody tr:hover { background: rgba(13,21,32,.8); }
+ tbody tr.new-row { animation: rowIn 3s ease-out; }
+ @keyframes rowIn { 0% { background: rgba(167,139,250,.15); } 100% { background: transparent; } }
+
+ tbody tr.matched-row { animation: rowMatch 5s ease-out; }
+ @keyframes rowMatch {
+ 0%,20% { background: rgba(0,255,136,.25); box-shadow: inset 3px 0 0 var(--accent); }
+ 100% { background: transparent; }
+ }
+
+ /* 金黄高亮（已废弃：只保留给非钱包信号场景向后兼容，买入信号已改为仅信号列闪烁） */
+ tbody tr.signal-match {
+   background: rgba(255,215,0,0.18) !important;
+   box-shadow: inset 4px 0 0 #ffd700;
+ }
+ tbody tr.signal-match td { background: rgba(255,215,0,0.10); }
+
+ /* 钱包买入命中：只在信号列内部 .signal-cell 做背景，不染色 td 避免底部空白金黄 */
+ td.signal-cell-match {
+   background: transparent !important;
+ }
+ td.signal-cell-match .signal-cell {
+   background: rgba(255,215,0,0.20);
+   box-shadow: inset 3px 0 0 #ffd700;
+ }
+ td.signal-cell-flash .signal-cell { animation: signalCellFlash 2s ease-out; }
+ @keyframes signalCellFlash {
+   0%,40% { background: rgba(255,215,0,0.55); box-shadow: inset 3px 0 0 #ffd700; }
+   100%   { background: rgba(255,215,0,0.20); }
+ }
+
+ /* 钱包买入命中：实时市值K线列金黄高亮 — 仅应用在 mc-split 容器，不染色 td 本身 */
+ td.mc-cell-signal {
+   background: transparent !important;
+ }
+ td.mc-cell-signal .mc-split {
+   background: rgba(255,215,0,0.12);
+   box-shadow: inset 0 0 0 1px rgba(255,215,0,0.35);
+ }
+ td.mc-cell-signal-flash .mc-split { animation: mcCellFlash 2s ease-out; }
+ @keyframes mcCellFlash {
+   0%,40% { background: rgba(255,215,0,0.38); box-shadow: inset 0 0 0 1px rgba(255,215,0,0.7); }
+   100%   { background: rgba(255,215,0,0.12); }
+ }
+ /* K线图区域金黄边框 */
+ td.mc-cell-signal .mc-chart-wrap {
+   border-color: rgba(255,215,0,0.55) !important;
+ }
+ /* 交易明细区域金黄滚动条 */
+ td.mc-cell-signal .mc-split-right::-webkit-scrollbar-thumb {
+   background: rgba(255,215,0,0.5);
+ }
+
+ /* 媒体列：整块容器，五行垂直排列 */
+ .media-cell {
+   display: flex;
+   flex-direction: column;
+   gap: 4px;
+   font-family: var(--sans);
+   font-size: 12px;
+   line-height: 1.4;
+   word-break: break-all;
+ }
+ .media-row { display: flex; gap: 6px; align-items: flex-start; }
+ .media-label {
+   color: var(--muted);
+   font-size: 11px;
+   letter-spacing: 0;
+   min-width: 64px;
+   flex-shrink: 0;
+   text-transform: none;
+   font-weight: 500;
+ }
+ .media-value { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+ .media-value.addr   { color: #33bbee; font-family: var(--mono); font-size: 11px; word-break: break-all; overflow: visible; text-overflow: unset; }
+ .media-value.addr a { color: #33bbee; text-decoration: none; }
+ .media-value.addr a:hover { text-decoration: underline; }
+ /* 时间差文案：正数(晚于程序获取=红)，负数(早于程序获取=绿) */
+ .media-value.time        { color: #8fa4bc; font-size: 12px; font-family: var(--mono); }
+ .media-value.time.diff-pos { color: #ef4444; font-weight: 600; } /* 红(+) */
+ .media-value.time.diff-neg { color: #22c55e; font-weight: 600; } /* 绿(-) */
+ .media-value.time.diff-zero { color: var(--text); }              /* 0 */
+ /* 媒体创建时间：灰白色 */
+ .media-value.ctime  { color: #cbd5e1; font-size: 12px; font-family: var(--mono); }
+ .media-value.cctime { color: #8fa4bc; font-size: 12px; font-family: var(--mono); }
+ .media-value.cctime.diff-pos  { color: #ef4444; font-weight: 600; }
+ .media-value.cctime.diff-neg  { color: #22c55e; font-weight: 600; }
+ .media-value.cctime.diff-zero { color: var(--text); }
+ .media-value.content {
+   color: var(--text);
+   font-family: var(--sans);
+   font-size: 13px;
+   white-space: pre-wrap;
+   max-height: 60px;
+   overflow: hidden;
+   cursor: pointer;
+   line-height: 1.5;
+ }
+ .media-value.content.expanded { max-height: none; }
+ .media-empty { color: var(--muted); font-size: 12px; }
+
+ /* 信号列：与K线交易明细区域(mc-split-right)完全一致的滚动样式 */
+ .signal-cell {
+   display: flex;
+   flex-direction: column;
+   gap: 0;
+   padding: 2px 4px;
+   height: 160px;
+   min-height: 160px;
+   max-height: 160px;
+   overflow-y: auto;
+   overflow-x: hidden;
+   scrollbar-width: thin;
+   scrollbar-color: var(--accent2) transparent;
+   box-sizing: border-box;
+ }
+ .signal-cell::-webkit-scrollbar { width: 6px; }
+ .signal-cell::-webkit-scrollbar-track { background: transparent; }
+ .signal-cell::-webkit-scrollbar-thumb { background: rgba(0,170,255,0.4); border-radius: 3px; }
+ .signal-cell::-webkit-scrollbar-thumb:hover { background: rgba(0,170,255,0.7); }
+ .signal-empty { color: var(--muted); font-size: 9px; padding: 4px 0; text-align: center; }
+ /* 信号列条目：与 fm-trade-item 完全一致的布局（时间+方向+市值+地址+BNB） */
+ .signal-item {
+   display: flex;
+   align-items: center;
+   gap: 5px;
+   padding: 2px 0;
+   border-bottom: 1px solid rgba(26,45,71,.3);
+   font-family: var(--mono);
+   font-size: 9px;
+   white-space: nowrap;
+   overflow: hidden;
+ }
+ .signal-item:last-child { border-bottom: none; }
+ /* 信号列监控钱包名称（金黄，独占一行，在交易行上方） */
+ .signal-wallet-row {
+   display: flex;
+   align-items: center;
+   gap: 4px;
+   padding: 3px 0 1px;
+   font-family: var(--mono);
+   font-size: 9px;
+   border-bottom: none;
+   white-space: nowrap;
+   overflow: hidden;
+ }
+ .signal-wallet-name {
+   color: #ffd700;
+   font-weight: 700;
+   font-size: 9px;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   max-width: 110px;
+ }
+ .signal-name {
+   color: #ffd700;
+   font-weight: 700;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   font-size: 10px;
+ }
+
+ /* ── 监控钱包用户名：蓝色齿轮 + 灰白色文字 ── */
+ .wm-username {
+   display: inline-flex;
+   align-items: center;
+   gap: 5px;
+ }
+ .wm-username-gear {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   flex-shrink: 0;
+   line-height: 1;
+   user-select: none;
+ }
+ .wm-username-text {
+   color: #a8b8c8;
+   font-size: 12px;
+   font-weight: 600;
+   font-family: var(--sans);
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+ }
+ .signal-meta {
+   display: flex;
+   gap: 4px;
+   align-items: center;
+   font-size: 9px;
+ }
+ .signal-meta .s-buy { color: #00ff88; font-weight: 700; }
+ .signal-meta .s-sell { color: #ef4444; font-weight: 700; }
+ .signal-meta .s-vol { color: #c8d8e8; }
+ .signal-meta .s-time { color: var(--muted); }
+
+ tbody tr.enriched-flash { animation: enrichFlash 1.5s ease-out; }
+ @keyframes enrichFlash {
+ 0%,30% { background: rgba(0,170,255,.12); }
+ 100% { background: transparent; }
+ }
+
+ td {
+ padding: 10px 12px;
+ font-size: 13px;
+ vertical-align: top;
+ font-family: var(--sans);
+ max-height: 160px;
+ overflow: hidden;
+ }
+
+ /* 列宽：代币列=200px，媒体列=400px，实时市值K线（弹性，已减100px余量），信号列=300px，购买状态=450px */
+ .col-token   { width: 200px; max-height: 160px; overflow: hidden; }
+ .col-media   { width: 400px; max-height: 160px; overflow: hidden; }
+ .col-mc      { min-width: 200px; } /* 弹性列，由table-layout:fixed的剩余宽度决定，视觉上比原来减少100px */
+ .col-signal  { width: 300px; min-width: 300px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); height: 160px; overflow: hidden; }
+ .col-buy     { width: 450px; min-width: 450px; }
+
+ /* 所有列显示边框 */
+ thead th, tbody td { border-left: 1px solid rgba(38,52,74,0.5); }
+ thead th:first-child, tbody td:first-child { border-left: none; }
+ /* table 左右与 div 表头对齐（table-wrap padding 为0，用首尾列补齐）*/
+ tbody td:first-child { padding-left: 16px; }
+ tbody td:last-child  { padding-right: 16px; }
+
+ /* ── 市值K线列：左K线图 / 右交易明细 ── */
+ .mc-split {
+ display: flex;
+ width: 100%;
+ height: 160px;
+ min-height: 160px;
+ max-height: 160px;
+ gap: 0;
+ overflow: hidden;
+ }
+ .mc-split-left {
+ flex: 0 0 auto;       /* 不伸缩，由 mc-chart-wrap 的固定高度决定 */
+ width: 60%;
+ border-right: 1px solid var(--border);
+ display: flex;
+ flex-direction: column;
+ }
+ .mc-split-right {
+ flex: 1;
+ min-width: 0;
+ height: 160px;        /* 与 mc-chart-wrap 同高，防止撑高行 */
+ overflow-y: auto;
+ overflow-x: hidden;
+ padding: 2px 4px;
+ scrollbar-width: thin;
+ scrollbar-color: var(--accent2) transparent;
+ }
+ .mc-split-right::-webkit-scrollbar { width: 6px; }
+ .mc-split-right::-webkit-scrollbar-track { background: transparent; }
+ .mc-split-right::-webkit-scrollbar-thumb { background: rgba(0,170,255,0.4); border-radius: 3px; }
+ .mc-split-right::-webkit-scrollbar-thumb:hover { background: rgba(0,170,255,0.7); }
+
+ /* ── 交易明细行 ── */
+ .fm-trade-item {
+ display: flex;
+ align-items: center;
+ gap: 15px;
+ padding: 2px 0;
+ border-bottom: 1px solid rgba(26,45,71,.3);
+ font-family: var(--mono);
+ font-size: 9px;
+ white-space: nowrap;
+ overflow: hidden;
+ }
+ .fm-trade-item:last-child { border-bottom: none; }
+ .fm-side-buy  { color: #00ff88; font-weight: 700; flex-shrink: 0; }
+ .fm-side-sell { color: #ef4444; font-weight: 700; flex-shrink: 0; }
+ .fm-addr { color: #7a9fc0; overflow: hidden; text-overflow: ellipsis; max-width: 72px; flex-shrink: 0; }
+ .fm-vol  { color: #c8d8e8; flex-shrink: 0; }
+ /* ── 交易时间戳（行内最左） ── */
+ .fm-time-sep {
+  font-family: var(--mono);
+  font-size: 8px;
+  color: var(--muted);
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
+ }
+
+ /* ── Token Cell ── */
+ .token-cell { display: flex; align-items: flex-start; gap: 10px; }
+ .token-img-wrap { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+ .token-img {
+ width: 69px; height: 69px;
+ border-radius: 12px;
+ object-fit: cover;
+ border: 1px solid var(--border);
+ background: var(--surface2);
+ }
+ .token-img.no-img { opacity: .3; }
+ /* 合约地址放图片正下方 */
+ .addr-under-img {
+ font-family: var(--mono);
+ font-size: 9px;
+ color: #a0b4c8;
+ margin-top: 4px;
+ cursor: pointer;
+ text-align: center;
+ max-width: 75px;
+ white-space: nowrap;
+ overflow: hidden;
+ text-overflow: ellipsis;
+ }
+ .addr-under-img:hover { color: var(--accent); }
+
+ .token-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+ .token-name { font-weight: 600; font-size: 14px; color: var(--text); line-height: 1.3; }
+ .token-sub { font-size: 12px; color: var(--muted); font-family: var(--sans); line-height: 1.3; }
+
+ /* ── 推文卡片 ── */
+ .tweet-card {
+   background: #16202c;
+   border: 1px solid #2a3a4a;
+   border-radius: 12px;
+   padding: 10px 12px 8px;
+   max-width: 100%;
+   box-sizing: border-box;
+   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+ }
+ .tweet-header {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   margin-bottom: 6px;
+ }
+ .tweet-avatar {
+   width: 36px;
+   height: 36px;
+   border-radius: 50%;
+   object-fit: cover;
+   flex-shrink: 0;
+   background: #2a3a4a;
+ }
+ .tweet-avatar-placeholder {
+   width: 36px;
+   height: 36px;
+   border-radius: 50%;
+   background: #1da1f2;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   font-size: 16px;
+   color: #fff;
+   flex-shrink: 0;
+ }
+ .tweet-user-info {
+   flex: 1;
+   min-width: 0;
+   display: flex;
+   flex-direction: column;
+   gap: 1px;
+ }
+ .tweet-name-row {
+   display: flex;
+   align-items: center;
+   gap: 4px;
+   min-width: 0;
+ }
+ .tweet-name {
+   font-weight: 700;
+   font-size: 13px;
+   color: #e7e9ea;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   max-width: 140px;
+ }
+ .tweet-verified {
+   color: #1da1f2;
+   font-size: 13px;
+   flex-shrink: 0;
+ }
+ .tweet-xlogo {
+   margin-left: auto;
+   flex-shrink: 0;
+   opacity: 0.7;
+ }
+ .tweet-handle {
+   font-size: 11px;
+   color: #8b98a5;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+ }
+ .tweet-body {
+   font-size: 12.5px;
+   color: #e7e9ea;
+   line-height: 1.5;
+   word-break: break-word;
+   white-space: pre-wrap;
+   margin-bottom: 7px;
+   max-height: 72px;
+   overflow: hidden;
+   transition: max-height 0.2s;
+ }
+ .tweet-body.expanded {
+   max-height: none;
+ }
+ .tweet-body:hover { cursor: pointer; }
+ .tweet-footer {
+   border-top: 1px solid #2a3a4a;
+   padding-top: 6px;
+   display: flex;
+   flex-direction: column;
+   gap: 3px;
+ }
+ .tweet-stats {
+   display: flex;
+   gap: 12px;
+   flex-wrap: wrap;
+ }
+ .tweet-stat {
+   display: flex;
+   align-items: center;
+   gap: 3px;
+   font-size: 10px;
+   color: #8b98a5;
+ }
+ .tweet-stat svg { opacity: 0.7; }
+ .tweet-times {
+   display: flex;
+   flex-direction: column;
+   gap: 1px;
+ }
+ .tweet-time-addr { font-size: 10px; color: #1da1f2; font-family: var(--mono); }
+ .tweet-time-content { font-size: 10px; color: #00ff88; font-family: var(--mono); }
+ .tweet-create-time { font-size: 10px; color: #8b98a5; font-family: var(--mono); }
+ /* 无推特时占位 */
+ .tw-empty {
+   font-size: 11px;
+   color: var(--muted);
+ }
+ /* 旧兼容 */
+ .tw-link {
+   font-family: var(--mono);
+   font-size: 11px;
+   color: #1da1f2;
+   display: block;
+   text-decoration: none;
+   line-height: 1.4;
+ }
+ .tw-meta {
+   font-size: 10px;
+   color: var(--muted);
+   margin-top: 2px;
+   display: flex;
+   flex-direction: column;
+   gap: 1px;
+ }
+
+ .match-badge, .bought-badge, .sell1-badge, .sell2-badge {
+ display: inline-flex;
+ align-items: center;
+ gap: 4px;
+ padding: 4px 10px;
+ font-size: 10px;
+ font-weight: 700;
+ border-radius: 20px;
+ white-space: nowrap;
+ }
+ .match-badge { background: rgba(0,255,136,.15); border: 1px solid rgba(0,255,136,.4); color: var(--accent); }
+ .bought-badge { background: rgba(0,170,255,.15); border: 1px solid rgba(0,170,255,.4); color: var(--accent2); }
+ .sell1-badge { background: rgba(245,158,11,.15); border-color: rgba(245,158,11,.4); color: var(--sell1); }
+ .sell2-badge { background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.4); color: var(--sell2); }
+
+ .buy-success { color: #00ff88; font-weight: 700; }
+ .buy-failed { color: #ff4444; font-weight: 700; }
+ .buy-filtered { color: #ffcc00; font-weight: 700; }
+
+ /* ── K线图容器：固定 160px，不随行内容拉伸 ── */
+ .mc-chart-wrap {
+ position: relative;
+ width: 100%;
+ height: 160px;        /* 固定高度，防止 canvas 无限拉伸 */
+ flex-shrink: 0;
+ background: #0a0e14;
+ border-radius: 0;
+ overflow: hidden;
+ border: none;
+ border-bottom: 1px solid #1a2d47;
+ }
+ .mc-chart-wrap canvas {
+ display: block;
+ width: 100%;
+ height: 160px;        /* CSS size matches container — JS sets physical pixels via DPR */
+ }
+ /* 当前市值右侧价格标签（TradingView风格） */
+ .mc-label-badge {
+ position: absolute;
+ right: 0; 
+ font-family: var(--mono);
+ font-size: 11px;
+ font-weight: 700;
+ padding: 2px 5px;
+ border-radius: 2px 0 0 2px;
+ pointer-events: none;
+ white-space: nowrap;
+ transform: translateY(-50%);
+ z-index: 2;
+ -webkit-font-smoothing: antialiased;
+ }
+
+ .trade-list, .positions-section { flex: 1; overflow-y: auto; padding: 10px 16px; }
+
+ .trade-card {
+ border: 1px solid var(--border);
+ border-radius: 10px;
+ padding: 12px 14px;
+ margin-bottom: 8px;
+ background: var(--surface2);
+ animation: slideIn .3s ease-out;
+ }
+ @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+ .trade-card.buy { border-left: 3px solid var(--accent); }
+ .trade-card.sell1 { border-left: 3px solid var(--sell1); }
+ .trade-card.sell2 { border-left: 3px solid var(--sell2); }
+ .trade-card.fail { border-left: 3px solid var(--muted); opacity: .6; }
+
+ .trade-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+ .trade-type { font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 2px 8px; border-radius: 4px; }
+ .trade-type.buy { background: rgba(0,255,136,.2); color: var(--accent); }
+ .trade-type.sell1 { background: rgba(245,158,11,.2); color: var(--sell1); }
+ .trade-type.sell2 { background: rgba(239,68,68,.2); color: var(--sell2); }
+ .trade-time { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+ .trade-token { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+ .trade-token-img { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; border: 1px solid var(--border); }
+ .trade-token-name { font-weight: 700; font-size: 13px; }
+ .trade-token-sym { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+ .trade-rows { display: flex; flex-direction: column; gap: 4px; }
+ .trade-row { display: flex; justify-content: space-between; font-size: 11px; }
+ .trade-row-label { color: var(--muted); }
+ .trade-row-val { font-family: var(--mono); font-weight: 700; }
+
+ .tx-link {
+ font-family: var(--mono); font-size: 10px; color: var(--accent2);
+ text-decoration: none; display: block; margin-top: 6px;
+ overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+ }
+
+ .pos-card { padding: 10px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+ .pos-info { flex: 1; }
+ .pos-name { font-size: 13px; font-weight: 700; }
+ .pos-mc { font-family: var(--mono); font-size: 11px; color: var(--accent2); }
+ .pos-stages { display: flex; gap: 4px; }
+ .pos-stage { font-size: 9px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); }
+ .pos-stage.done { border-color: rgba(0,255,136,.3); color: var(--accent); background: rgba(0,255,136,.1); }
+
+ .config-bar {
+ border-top: 1px solid var(--border);
+ padding: 12px 18px;
+ background: var(--surface2);
+ font-size: 11px;
+ color: var(--muted);
+ display: flex;
+ flex-wrap: wrap;
+ gap: 16px;
+ }
+ .cfg-item { display: flex; gap: 6px; align-items: center; }
+ .cfg-label { color: var(--muted); }
+ .cfg-val { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+
+ .empty { text-align: center; padding: 80px 20px; color: var(--muted); font-size: 13px; }
+ .empty-icon { font-size: 42px; margin-bottom: 16px; opacity: .4; }
+
+ .copied-tip {
+ position: fixed;
+ background: var(--accent);
+ color: #000;
+ font-family: var(--mono);
+ font-size: 11px;
+ padding: 4px 10px;
+ border-radius: 6px;
+ pointer-events: none;
+ opacity: 0;
+ transition: opacity .2s;
+ z-index: 9999;
+ }
+
+ /* ── 钱包监控 tab ── */
+ .wm-header {
+ display: flex;
+ align-items: center;
+ gap: 12px;
+ padding: 10px 16px;
+ border-bottom: 1px solid var(--border);
+ background: var(--surface);
+ flex-wrap: wrap;
+ flex-shrink: 0;
+ }
+ /* 监控钱包汇总栏 */
+ .wm-summary {
+ display: flex;
+ align-items: center;
+ gap: 10px;
+ flex: 1;
+ min-width: 0;
+ }
+ .wm-count-badge {
+ display: flex;
+ align-items: center;
+ gap: 6px;
+ padding: 5px 14px;
+ border-radius: 20px;
+ border: 1px solid rgba(0,255,136,.4);
+ background: rgba(0,255,136,.08);
+ font-size: 12px;
+ font-family: var(--mono);
+ color: var(--accent);
+ font-weight: 700;
+ white-space: nowrap;
+ flex-shrink: 0;
+ cursor: pointer;
+ user-select: none;
+ transition: background .15s;
+ }
+ .wm-count-badge:hover { background: rgba(0,255,136,.15); }
+ .wm-count-badge .wm-count-num { font-size: 15px; }
+ .wm-toggle-hint {
+ font-size: 10px;
+ color: var(--muted);
+ font-family: var(--mono);
+ white-space: nowrap;
+ }
+ /* 展开后的钱包列表面板 */
+ .wm-wallet-panel {
+ display: none;
+ flex-shrink: 0;
+ width: 100%;
+ padding: 8px 16px 12px;
+ border-bottom: 1px solid var(--border);
+ background: var(--surface2);
+ }
+ .wm-wallet-panel.open { display: block; }
+ .wm-wallet-grid {
+ display: grid;
+ grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+ gap: 6px;
+ }
+ .wm-wallet-card {
+ display: flex;
+ align-items: center;
+ gap: 8px;
+ padding: 6px 10px;
+ border-radius: 8px;
+ border: 1px solid var(--border);
+ background: var(--surface);
+ font-family: var(--mono);
+ cursor: pointer;
+ transition: border-color .15s;
+ }
+ .wm-wallet-card:hover { border-color: rgba(0,255,136,.4); }
+ .wm-wallet-card .wm-card-dot {
+ display: none;
+ }
+ .wm-wallet-card .wm-card-name {
+ font-size: 11px;
+ font-weight: 700;
+ color: var(--accent);
+ white-space: nowrap;
+ overflow: hidden;
+ text-overflow: ellipsis;
+ flex: 1;
+ min-width: 0;
+ }
+ .wm-wallet-card .wm-card-addr {
+ font-size: 10px;
+ color: var(--muted);
+ white-space: nowrap;
+ flex-shrink: 0;
+ }
+ /* 旧版兼容 */
+ .wm-wallets {
+ display: flex;
+ gap: 8px;
+ flex-wrap: wrap;
+ flex: 1;
+ }
+ .wm-wallet-tag {
+ display: flex;
+ align-items: center;
+ gap: 6px;
+ padding: 4px 10px;
+ border-radius: 20px;
+ border: 1px solid var(--border);
+ background: var(--surface2);
+ font-size: 11px;
+ font-family: var(--mono);
+ color: var(--text);
+ cursor: default;
+ }
+ .wm-wallet-tag .wm-name { color: var(--accent); font-weight: 700; }
+ .wm-wallet-tag .wm-addr { color: var(--muted); font-size: 10px; }
+ .wm-status-badge {
+ display: flex;
+ align-items: center;
+ gap: 6px;
+ padding: 4px 12px;
+ border-radius: 20px;
+ border: 1px solid var(--accent);
+ color: var(--accent);
+ font-size: 11px;
+ font-family: var(--mono);
+ white-space: nowrap;
+ flex-shrink: 0;
+ }
+ .wm-status-badge.offline {
+ border-color: var(--sell2);
+ color: var(--sell2);
+ }
+
+ /* 行为标签 */
+ .wm-action-buy  { color: #00ff88; font-weight: 700; font-family: var(--mono); font-size: 12px; }
+ .wm-action-sell { color: #ef4444; font-weight: 700; font-family: var(--mono); font-size: 12px; }
+ .wm-action-other { color: #a0b4c8; font-family: var(--mono); font-size: 11px; }
+
+ /* CA 地址格子 */
+ .wm-ca {
+ font-family: var(--mono);
+ font-size: 11px;
+ color: #a0b4c8;
+ cursor: pointer;
+ display: flex;
+ flex-direction: column;
+ gap: 2px;
+ }
+ .wm-ca:hover .wm-ca-full { color: var(--accent); }
+ .wm-ca-short { font-size: 12px; color: #c8dff0; }
+ .wm-ca-link {
+ font-size: 10px;
+ color: var(--accent2);
+ text-decoration: none;
+ }
+ .wm-ca-link:hover { text-decoration: underline; }
+
+ /* 新行动画 */
+ tbody tr.wm-new-row { animation: wmRowIn 3s ease-out; }
+ @keyframes wmRowIn {
+ 0% { background: rgba(0,255,136,.18); }
+ 100% { background: transparent; }
+ }
+ .wm-buy-row { background: rgba(0,232,122,.06) !important; box-shadow: inset 3px 0 0 rgba(0,232,122,.6); }
+ .wm-sell-row { background: rgba(239,68,68,.06) !important; box-shadow: inset 3px 0 0 rgba(239,68,68,.6); }
+
+ /* Tx hash 链接 */
+ .wm-tx-link {
+ font-family: var(--mono);
+ font-size: 10px;
+ color: var(--accent2);
+ text-decoration: none;
+ white-space: nowrap;
+ overflow: hidden;
+ text-overflow: ellipsis;
+ display: block;
+ max-width: 88px;
+ }
+ .wm-tx-link:hover { color: var(--accent); }
+
+ /* ── 钱包监控：代币信息列 ── */
+ .wm-token-cell {
+   display: flex;
+   align-items: flex-start;
+   gap: 8px;
+ }
+ .wm-token-img-wrap {
+   flex-shrink: 0;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   gap: 3px;
+ }
+ .wm-token-img {
+   width: 70px;
+   height: 70px;
+   border-radius: 8px;
+   object-fit: cover;
+   border: 1px solid var(--border);
+   background: var(--surface2);
+ }
+ .wm-token-img.no-img { opacity: .3; }
+ .wm-token-info {
+   flex: 1;
+   min-width: 0;
+   display: flex;
+   flex-direction: column;
+   gap: 2px;
+ }
+ .wm-token-name {
+   font-weight: 700;
+   font-size: 12px;
+   color: #c8dff0;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   max-width: 140px;
+ }
+ .wm-token-symbol {
+   font-family: var(--mono);
+   font-size: 10px;
+   color: #3be;
+ }
+ .wm-token-tw {
+   display: flex;
+   align-items: center;
+   gap: 3px;
+   font-size: 10px;
+   color: #33bbee;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   max-width: 148px;
+   text-decoration: none;
+ }
+ .wm-token-tw:hover { text-decoration: underline; }
+ .wm-token-social {
+   display: flex;
+   gap: 5px;
+   flex-wrap: wrap;
+   margin-top: 1px;
+ }
+ .wm-social-link {
+   font-size: 9px;
+   font-family: var(--mono);
+   padding: 1px 5px;
+   border-radius: 3px;
+   border: 1px solid rgba(51,187,238,.3);
+   color: #33bbee;
+   text-decoration: none;
+   white-space: nowrap;
+ }
+ .wm-social-link:hover { border-color: #33bbee; color: #fff; }
+ /* meta 加载占位闪烁 */
+ .wm-meta-loading {
+   font-size: 9px;
+   color: var(--muted);
+   font-family: var(--mono);
+   animation: pulse 1.5s infinite;
+ }
+ /* 市值显示 */
+ .wm-token-mc {
+   font-family: var(--mono);
+   font-size: 11px;
+   font-weight: 700;
+   color: var(--accent2);
+   margin-top: 1px;
+ }
+ /* description 简介 */
+ .wm-token-desc {
+   font-size: 9px;
+   color: var(--muted);
+   line-height: 1.4;
+   max-height: 28px;
+   overflow: hidden;
+   display: -webkit-box;
+   -webkit-line-clamp: 2;
+   -webkit-box-orient: vertical;
+   margin-top: 1px;
+ }
+ /* 数据来源标签 */
+ .wm-meta-badge {
+   display: inline-block;
+   font-family: var(--mono);
+   font-size: 8px;
+   padding: 1px 4px;
+   border-radius: 3px;
+   border: 1px solid;
+   margin-top: 2px;
+   line-height: 1.4;
+   white-space: nowrap;
+ }
+ .wm-meta-badge.src-wss   { color: var(--accent);  border-color: rgba(0,255,136,.4); }
+ .wm-meta-badge.src-cache { color: #a0b4c8;         border-color: rgba(160,180,200,.3); }
+ .wm-meta-badge.src-api   { color: var(--sell1);    border-color: rgba(245,158,11,.4); }
+ .wm-meta-badge.src-chain { color: var(--muted);    border-color: rgba(74,101,128,.4); }
+ /* API 耗时行 */
+ .wm-api-timing {
+   font-family: var(--mono);
+   font-size: 8px;
+   color: var(--muted);
+   line-height: 1.5;
+   margin-top: 1px;
+ }
+ .wm-api-timing span { color: #7a9fc0; }
+
+
+</style>
+</head>
+<body>
+
+<div class="copied-tip" id="copied-tip">已复制</div>
+
+<header>
+ <div class="logo">
+ <div class="logo-dot"></div>
+ Four.meme Bot
+ </div>
+ <div class="header-stats">
+ <div class="hstat"><span class="hstat-label">BNB 价格</span><span class="hstat-val" id="bnb-price">—</span></div>
+ <div class="hstat"><span class="hstat-label">钱包余额</span><span class="hstat-val blue" id="bnb-balance">—</span></div>
+ <div class="hstat"><span class="hstat-label">已捕获</span><span class="hstat-val" id="token-count">0</span></div>
+ <div class="hstat"><span class="hstat-label">持仓数</span><span class="hstat-val warn" id="pos-count">0</span></div>
+ <div class="ws-badges">
+ <div class="ws-badge chain-badge" id="chain-badge">
+ <div class="ws-dot"></div>
+ <span>链上</span>
+ </div>
+ <div class="ws-badge fm-badge" id="fm-badge">
+ <div class="ws-dot"></div>
+ <span>four.meme</span>
+ </div>
+ </div>
+ </div>
+</header>
+
+<div class="layout">
+ <div class="left-panel">
+ <div class="tabs">
+ <div class="tab active" data-tab="all" onclick="switchTab('all')">全部 MEME <span class="tab-badge" id="tab-all-count">0</span></div>
+ <div class="tab" data-tab="trade" onclick="switchTab('trade')">🎯 狙击记录 <span class="tab-badge" id="tab-trade-count">0</span></div>
+ <div class="tab" data-tab="walletmon" onclick="switchTab('walletmon')">👁 钱包监控 <span class="tab-badge" id="tab-wallet-count">0</span></div>
+ </div>
+
+ <!-- 全部 MEME -->
+ <div class="tab-content active" id="tab-all">
+ <!-- 固定表头 DIV，全宽覆盖，脱离滚动 -->
+ <div class="table-col-header">
+  <div class="th-token">代币</div>
+  <div class="th-media">媒体</div>
+  <div class="th-mc">实时市值 K线</div>
+  <div class="th-signal">信号</div>
+  <div class="th-buy">购买状态</div>
+ </div>
+ <div class="table-wrap">
+ <table>
+ <tbody id="all-tbody"></tbody>
+ </table>
+ <div class="empty" id="all-empty">
+ <div class="empty-icon">⛓️</div>
+ 等待链上 MEME 创建事件...
+ </div>
+ </div>
+ </div>
+
+
+ <!-- 钱包监控 -->
+ <div class="tab-content" id="tab-walletmon">
+ <!-- 顶部汇总栏：点击展开/折叠完整列表 -->
+ <div class="wm-header">
+ <div class="wm-summary">
+ <div class="wm-count-badge" id="wm-count-badge" onclick="toggleWmPanel()" title="点击展开/折叠监控列表">
+ <span>监控钱包</span>
+ <span class="wm-count-num" id="wm-wallet-count">0</span>
+ <span>个</span>
+ </div>
+ <span class="wm-toggle-hint" id="wm-toggle-hint">▼ 展开查看</span>
+ </div>
+ <div class="wm-status-badge" id="wm-status-badge">
+ <div class="ws-dot"></div><span>链上监控</span>
+ </div>
+ </div>
+ <!-- 可折叠的完整钱包列表面板 -->
+ <div class="wm-wallet-panel" id="wm-wallet-panel">
+ <div class="wm-wallet-grid" id="wm-wallet-list">
+ <!-- 动态填充 -->
+ </div>
+ </div>
+ <div class="table-wrap">
+ <table id="wm-table">
+ <thead>
+ <tr>
+ <th style="width:140px;text-align:center;vertical-align:middle">时间</th>
+ <th style="width:160px;text-align:center;vertical-align:middle">钱包</th>
+ <th style="width:60px;text-align:center;vertical-align:middle">操作</th>
+ <th style="width:110px;text-align:center;vertical-align:middle">市值</th>
+ <th style="text-align:center;vertical-align:middle">CA</th>
+ <th style="width:100px;text-align:center;vertical-align:middle">金额(BNB)</th>
+ <th style="width:100px;text-align:center;vertical-align:middle">Gwei</th>
+ </tr>
+ </thead>
+ <tbody id="wm-tbody"></tbody>
+ </table>
+ <div class="empty" id="wm-empty">
+ <div class="empty-icon">👁</div>
+ 等待链上钱包交易...
+ </div>
+ </div>
+ </div>
+ </div>
+</div>
+
+<script>
+// ── 钱包监控用户名图标：蓝色齿轮 + 正中白色勾 ──────────────────
+const WM_GEAR_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="#1D9BF0" d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7zm7.43-1.37a1.6 1.6 0 0 0 .1-1.86l-1.62-2.8a1.6 1.6 0 0 0-1.72-.75l-1.24.32a8.2 8.2 0 0 0-1.04-.6l-.25-1.27A1.6 1.6 0 0 0 13.1 6h-2.2a1.6 1.6 0 0 0-1.57 1.3l-.26 1.27a8.2 8.2 0 0 0-1.04.6l-1.24-.32a1.6 1.6 0 0 0-1.72.75L3.47 12.4a1.6 1.6 0 0 0 .39 2.07l1 .78a6.6 6.6 0 0 0 0 1.1l-1 .78a1.6 1.6 0 0 0-.39 2.07l1.62 2.8a1.6 1.6 0 0 0 1.72.75l1.23-.32c.33.22.68.43 1.05.6l.26 1.27A1.6 1.6 0 0 0 10.9 25h2.2a1.6 1.6 0 0 0 1.57-1.3l.25-1.27c.37-.17.72-.38 1.05-.6l1.23.32a1.6 1.6 0 0 0 1.72-.75l1.62-2.8a1.6 1.6 0 0 0-.39-2.07l-1-.78c.02-.37.02-.73 0-1.1l1-.78z"/><polyline points="9,12 11,14.5 15.5,9.5" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// ═══════════════════════════════════════════════════
+// K线图模块 —— TradingView 风格蜡烛图
+// ═══════════════════════════════════════════════════
+
+// chartDataMap: tokenId -> { candles:[{t,o,h,l,c}], startSec }
+// 每根蜡烛 = 1秒，o=开盘,h=最高,l=最低,c=收盘
+const chartDataMap = {};
+
+function getChartState(tokenId) {
+ if (!chartDataMap[tokenId]) {
+ chartDataMap[tokenId] = { candles: [], startSec: null, allTimeMC: 0 };
+ }
+ return chartDataMap[tokenId];
+}
+
+/**
+ * 推入新市值数据点，自动合并成1秒蜡烛
+ */
+function pushMCData(tokenId, mcUSD) {
+ const state = getChartState(tokenId);
+ const nowSec = Math.floor(Date.now() / 1000);
+ if (state.startSec === null) state.startSec = nowSec;
+ const t = nowSec - state.startSec;
+
+ // 更新历史最高市值
+ if (mcUSD > state.allTimeMC) state.allTimeMC = mcUSD;
+
+ const last = state.candles[state.candles.length - 1];
+ if (last && last.t === t) {
+ // 同一秒内更新 high/low/close
+ last.h = Math.max(last.h, mcUSD);
+ last.l = Math.min(last.l, mcUSD);
+ last.c = mcUSD;
+ } else {
+ // 新一秒：开盘=上根收盘（或当前值）
+ const open = last ? last.c : mcUSD;
+ state.candles.push({ t, o: open, h: Math.max(open, mcUSD), l: Math.min(open, mcUSD), c: mcUSD });
+ // 最多保留600根（10分钟）
+ if (state.candles.length > 600) state.candles.shift();
+ }
+
+ // 重绘所有此token的canvas
+ document.querySelectorAll(`canvas[data-token-id="${tokenId}"]`).forEach(canvas => {
+ drawChart(canvas, tokenId);
+ });
+}
+
+/**
+ * TradingView风格蜡烛图绘制
+ * - 弹性Y轴（数据范围±10%留白，整数刻度）
+ * - 蜡烛：绿涨红跌，实体+上下影线
+ * - 底部成交量迷你柱（固定高度区域）
+ * - 右侧当前价格标签
+ * - 水平虚线价格参考
+ * - X轴时间刻度
+ */
+function drawChart(canvas, tokenId) {
+ const state = chartDataMap[tokenId];
+ if (!state || !state.candles.length) return;
+
+ const dpr = window.devicePixelRatio || 1;
+ // 使用 getBoundingClientRect 获取精确 CSS 尺寸（比 offsetWidth 更可靠）
+ const rect = canvas.getBoundingClientRect();
+ const W = Math.round(rect.width) || canvas.offsetWidth || 320;
+ const H = Math.round(rect.height) || canvas.offsetHeight || 160;
+
+ // 跳过尚未布局的 canvas（宽高为0）
+ if (W < 10 || H < 10) return;
+
+ // 始终同步物理像素尺寸（确保 DPR 变化或布局变化时不模糊）
+ const pxW = Math.round(W * dpr);
+ const pxH = Math.round(H * dpr);
+ if (canvas.width !== pxW || canvas.height !== pxH) {
+ canvas.width = pxW;
+ canvas.height = pxH;
+ }
+ const ctx = canvas.getContext('2d');
+ ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+ // ── 布局常量 ──
+ const PAD_LEFT   = 4;
+ const PAD_RIGHT  = 36;   // 右侧价格轴宽
+ const PAD_TOP    = 6;
+ const PAD_BOT    = 4;    // 底部仅留微小间距
+ const chartW     = W - PAD_LEFT - PAD_RIGHT;
+ const priceH     = H - PAD_TOP - PAD_BOT;
+
+ // ── 背景 ──
+ ctx.fillStyle = '#0a0e14';
+ ctx.fillRect(0, 0, W, H);
+
+ const candles = state.candles;
+ // 只显示能放下的最近N根
+ const CANDLE_W  = Math.max(2, Math.min(8, Math.floor(chartW / 60)));
+ const CANDLE_GAP = Math.max(1, Math.floor(CANDLE_W * 0.35));
+ const UNIT_W    = CANDLE_W + CANDLE_GAP;
+ const maxVisible = Math.floor(chartW / UNIT_W);
+ const visible    = candles.slice(-maxVisible);
+ const N          = visible.length;
+
+ // ── 弹性Y轴：基于可见蜡烛数据范围 ──
+ let yMin = Infinity, yMax = -Infinity;
+ visible.forEach(c => {
+ yMin = Math.min(yMin, c.l);
+ yMax = Math.max(yMax, c.h);
+ });
+ if (yMin === yMax) { yMin *= 0.95; yMax *= 1.05; }
+ const pad = (yMax - yMin) * 0.12;
+ yMin = Math.max(0, yMin - pad);
+ yMax = yMax + pad;
+ const yRange = yMax - yMin;
+
+ // 计算人性化刻度
+ function niceStep(range, maxTicks) {
+ const raw = range / maxTicks;
+ const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+ const norm = raw / mag;
+ let step;
+ if (norm <= 1) step = mag;
+ else if (norm <= 2) step = 2 * mag;
+ else if (norm <= 5) step = 5 * mag;
+ else step = 10 * mag;
+ return step;
+ }
+ const step = niceStep(yRange, 4);
+ const firstTick = Math.ceil(yMin / step) * step;
+ const ticks = [];
+ for (let v = firstTick; v <= yMax + step * 0.01; v += step) ticks.push(v);
+
+ function yPos(v) {
+ return PAD_TOP + priceH - ((v - yMin) / yRange) * priceH;
+ }
+
+ // ── 网格线 + Y轴标签 ──
+ ctx.font = `11px 'Inter', sans-serif`;
+ ctx.textAlign = 'right';
+ ticks.forEach(tick => {
+ const y = Math.round(yPos(tick));
+ if (y < PAD_TOP - 2 || y > PAD_TOP + priceH + 2) return;
+ // 实线网格
+ ctx.setLineDash([]);
+ ctx.strokeStyle = 'rgba(26,45,71,0.6)';
+ ctx.lineWidth = 0.5;
+ ctx.beginPath();
+ ctx.moveTo(PAD_LEFT, y + 0.5);
+ ctx.lineTo(PAD_LEFT + chartW, y + 0.5);
+ ctx.stroke();
+ // 右侧轴标签
+ ctx.fillStyle = '#5a7a9a';
+ const label = tick >= 1000 ? (tick / 1000).toFixed(tick % 1000 === 0 ? 0 : 1) + 'K' : tick.toFixed(0);
+ ctx.fillText(label, W - 2, y + 4);
+ });
+
+ // ── 成交量区已移除，蜡烛填满整个高度 ──
+
+ // ── 蜡烛 ──
+ const xStart = PAD_LEFT; // 从左侧开始绘制
+
+ for (let i = 0; i < N; i++) {
+ const c = visible[i];
+ const isGreen = c.c >= c.o;
+ const color   = isGreen ? '#26a69a' : '#ef5350'; // TradingView经典绿红
+ const x       = xStart + i * UNIT_W + CANDLE_W / 2;
+ const bodyTop = yPos(Math.max(c.o, c.c));
+ const bodyBot = yPos(Math.min(c.o, c.c));
+ let bodyH = bodyBot - bodyTop;
+ if (bodyH < 1) bodyH = 1;
+
+ // 影线
+ ctx.strokeStyle = color;
+ ctx.lineWidth = 1;
+ ctx.beginPath();
+ ctx.moveTo(x, yPos(c.h));
+ ctx.lineTo(x, bodyTop);
+ ctx.moveTo(x, bodyBot);
+ ctx.lineTo(x, yPos(c.l));
+ ctx.stroke();
+
+ // 实体
+ ctx.fillStyle = color;
+ ctx.fillRect(x - CANDLE_W / 2, bodyTop, CANDLE_W, bodyH);
+ }
+
+ // ── 当前价格水平线 ──
+ const lastCandle = visible[N - 1];
+ if (lastCandle) {
+ const curY = yPos(lastCandle.c);
+ const isGreenLast = lastCandle.c >= lastCandle.o;
+ const priceColor = isGreenLast ? '#26a69a' : '#ef5350';
+
+ // 最新柱子右上角价格标签
+ const lbl = lastCandle.c >= 1000
+ ? (lastCandle.c / 1000).toFixed(2) + 'K'
+ : lastCandle.c.toFixed(0);
+ ctx.font = `bold 11px 'Inter', sans-serif`;
+ const lastX = xStart + (N - 1) * UNIT_W + CANDLE_W / 2;
+ const lblW  = ctx.measureText(lbl).width + 8;
+ const lblX  = Math.round(Math.min(lastX + CANDLE_W / 2 + 2, PAD_LEFT + chartW - lblW));
+ const lblY  = Math.round(Math.max(PAD_TOP, curY - 10));
+ ctx.fillStyle = priceColor;
+ ctx.beginPath();
+ ctx.roundRect(lblX, lblY - 7, lblW, 15, 2);
+ ctx.fill();
+ ctx.fillStyle = '#fff';
+ ctx.textAlign = 'left';
+ ctx.fillText(lbl, lblX + 4, lblY + 5);
+ ctx.textAlign = 'center'; // 还原
+ }
+
+ // ── 历史最高市值：右上角纯数字标注（狙击MEME专用）──
+ const atMC = state.allTimeMC;
+ if (atMC > 0) {
+   const atLbl = atMC >= 1000 ? (atMC / 1000).toFixed(2) + 'K' : atMC.toFixed(0);
+   ctx.font = `bold 11px 'Inter', sans-serif`;
+   ctx.textAlign = 'right';
+   ctx.fillStyle = '#f59e0b';
+   ctx.fillText('▲' + atLbl, W - PAD_RIGHT - 2, PAD_TOP + 12);
+   ctx.textAlign = 'center';
+ }
+
+ // ── X轴时间刻度已移除，蜡烛填满整个区域 ──
+}
+
+/**
+ * 构建市值列 DOM（左K线图，右交易明细）
+ */
+function buildMCCell(tokenId, mc) {
+ const outerWrap = document.createElement('div');
+ outerWrap.className = 'mc-split';
+
+ // ── 左：K线图 ──
+ const leftDiv = document.createElement('div');
+ leftDiv.className = 'mc-split-left';
+ leftDiv.style.position = 'relative';
+
+ const chartWrap = document.createElement('div');
+ chartWrap.className = 'mc-chart-wrap';
+
+ const canvas = document.createElement('canvas');
+ canvas.dataset.tokenId = tokenId;
+ chartWrap.appendChild(canvas);
+
+ const badge = document.createElement('div');
+ badge.className = 'mc-label-badge';
+ badge.dataset.tokenId = tokenId;
+ badge.style.cssText = 'display:none;';
+ chartWrap.appendChild(badge);
+
+ leftDiv.appendChild(chartWrap);
+
+ // ── 右：钱包交易明细 ──
+ const rightDiv = document.createElement('div');
+ rightDiv.className = 'mc-split-right';
+ rightDiv.id = `fm-trades-${tokenId.toLowerCase()}`;
+ rightDiv.innerHTML = `<div style="color:var(--muted);font-size:9px;padding:4px 0;">等待交易流...</div>`;
+
+ outerWrap.appendChild(leftDiv);
+ outerWrap.appendChild(rightDiv);
+
+ if (mc > 0) pushMCData(tokenId, mc);
+
+ // 延迟绘制：确保 canvas 已经有实际尺寸（DOM 布局完成后）
+ requestAnimationFrame(() => {
+ if (mc > 0) drawChart(canvas, tokenId);
+ // 二次绘制保底：部分浏览器首帧 offsetWidth 还为0
+ setTimeout(() => { if (mc > 0) drawChart(canvas, tokenId); }, 50);
+ });
+
+ return outerWrap;
+}
+
+// ═══════════════════════════════════════════════════
+// 推特地址可读化
+// ═══════════════════════════════════════════════════
+function toReadableTwitter(url) {
+ if (!url) return { display: '', href: '' };
+ try {
+ let href = url.startsWith('http') ? url : 'https://' + url;
+ if (url.startsWith('/')) href = 'https://twitter.com' + url;
+ if (url.startsWith('@')) {
+  const uname = url.slice(1).split('/')[0].split('?')[0];
+  href = 'https://twitter.com/' + uname;
+ }
+ // display = 完整可读 URL（去掉 https://）
+ const display = href.replace(/^https?:\/\//, '');
+ return { display, href };
+ } catch (_) {}
+ return { display: url, href: url.startsWith('http') ? url : 'https://' + url };
+}
+
+// ═══════════════════════════════════════════════════
+// 时间解析 + 差值计算（对应 monitor.js 的 formatBeijingTimeMs 输出格式）
+// 格式示例："05/11 14:23:45.123" 或 "2026/05/11 14:23:45.123"
+// 两字段对比时，程序获取时间 = 基准；target - program。
+// 同源字段互减，年份缺失时补本机年份即可（同源差值不受年份影响）。
+// ═══════════════════════════════════════════════════
+function parseBeijingTimeStr(str) {
+  if (!str || str === '—' || str === '-') return null;
+  try {
+    let s = String(str).trim();
+    let year;
+    const yearMatch = s.match(/^(\d{4})\//);
+    if (yearMatch) { year = Number(yearMatch[1]); s = s.slice(yearMatch[0].length); }
+    else           { year = new Date().getFullYear(); }
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?/);
+    if (!m) { const t = Date.parse(str); return isNaN(t) ? null : new Date(t); }
+    const month = Number(m[1]) - 1;
+    const day   = Number(m[2]);
+    const hh    = Number(m[3]);
+    const mm    = Number(m[4]);
+    const ss    = Number(m[5]);
+    const ms    = m[6] ? Number(m[6].padEnd(3, '0')) : 0;
+    return new Date(year, month, day, hh, mm, ss, ms);
+  } catch (_) { return null; }
+}
+
+/**
+ * 格式化 target - base 差值。
+ * 返回 { text, sign }：
+ *   sign: 'pos' (target 晚于 base，+号，红色) | 'neg' (target 早于 base，-号，绿色) | 'zero' | null
+ * text: "+4.205秒" / "-0.327秒" / "0秒" / '—'
+ *
+ * 以"秒.毫秒"为基准格式（去掉 0:0 前缀，尾随 0 去除后保留最多 3 位小数）。
+ * 超过 60 秒时：显示 "+1分4.205秒"；超过 60 分时：显示 "+1小时2分3.4秒"。
+ */
+function fmtTimeDiff(targetStr, baseStr) {
+  const tTarget = parseBeijingTimeStr(targetStr);
+  const tBase   = parseBeijingTimeStr(baseStr);
+  if (!tTarget || !tBase) return { text: '—', sign: null };
+  const diffMs = tTarget.getTime() - tBase.getTime();
+  if (diffMs === 0) return { text: '0秒', sign: 'zero' };
+  const sign = diffMs > 0 ? 'pos' : 'neg';
+  const prefix = diffMs > 0 ? '+' : '-';
+  const absMs = Math.abs(diffMs);
+
+  // 秒 + 毫秒：保留最多 3 位小数，去除尾随 0
+  const fmtSec = (ms) => {
+    const s = ms / 1000;
+    // 固定 3 位小数，然后去除尾随 0 和可能的 "."
+    let str = s.toFixed(3).replace(/\.?0+$/, '');
+    if (str === '') str = '0';
+    return str;
+  };
+
+  let text;
+  if (absMs < 60_000) {
+    // < 60 秒：X.XXX秒
+    text = `${prefix}${fmtSec(absMs)}秒`;
+  } else if (absMs < 3600_000) {
+    // < 60 分：M分S.SSS秒
+    const min = Math.floor(absMs / 60000);
+    const rem = absMs - min * 60000;
+    text = `${prefix}${min}分${fmtSec(rem)}秒`;
+  } else {
+    // ≥ 60 分：H小时M分S.S秒
+    const hr  = Math.floor(absMs / 3600000);
+    const min = Math.floor((absMs - hr * 3600000) / 60000);
+    const rem = absMs - hr * 3600000 - min * 60000;
+    text = `${prefix}${hr}小时${min}分${fmtSec(rem)}秒`;
+  }
+  return { text, sign };
+}
+
+// ═══════════════════════════════════════════════════
+// four.meme 交易明细缓存：tokenAddress -> [{side,addr,vol,sym}]
+// ═══════════════════════════════════════════════════
+const fmTradesCache = {};
+// 监控钱包地址 → 用户名 Map（小写地址），用于 K线交易明细显示用户名
+const watchWalletMap = new Map();
+
+function fmNowTime() {
+ const d = new Date();
+ const mm = String(d.getMonth() + 1).padStart(2, '0');
+ const dd = String(d.getDate()).padStart(2, '0');
+ const hh = String(d.getHours()).padStart(2, '0');
+ const mi = String(d.getMinutes()).padStart(2, '0');
+ const ss = String(d.getSeconds()).padStart(2, '0');
+ return `${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
+
+function pushFmTrade(tokenAddress, rec) {
+ const key = tokenAddress.toLowerCase();
+ if (!fmTradesCache[key]) fmTradesCache[key] = [];
+ // 每条记录附带接收时刻
+ const entry = Object.assign({}, rec, { _ts: fmNowTime() });
+ fmTradesCache[key].unshift(entry);
+ // 保留最多 500 条（右侧容器可滚动查看全部）
+ if (fmTradesCache[key].length > 500) fmTradesCache[key].length = 500;
+}
+
+function renderFmTradePanel(tokenId) {
+ const panel = document.getElementById(`fm-trades-${tokenId.toLowerCase()}`);
+ if (!panel) return;
+ const trades = fmTradesCache[tokenId.toLowerCase()] || [];
+ if (!trades.length) {
+ panel.innerHTML = `<div style="color:var(--muted);font-size:9px;padding:4px 0;">等待交易流...</div>`;
+ return;
+ }
+ panel.innerHTML = '';
+ trades.forEach(t => {
+ const ts = t._ts || fmNowTime();
+ const isBuy = t.side === 1;
+ const div = document.createElement('div');
+ div.className = 'fm-trade-item';
+ // volume：优先用 t.volume，来自链上时 volume=bnbAmount 是字符串化的 ETH 数字
+ const rawVol = t.volume !== undefined ? t.volume : (t.bnbAmount || '0');
+ const vol = parseFloat(rawVol) > 0 ? parseFloat(rawVol).toFixed(4) : '—';
+ const sym = t.symbol || t.tokenSymbol || 'BNB';
+ const addr = t.userAddress || t.userName || '';
+ // 市值显示
+ const mc = t.marketCapUSD || 0;
+ const mcStr = mc > 0 ? fmtMC(mc) : '—';
+ // 监控钱包地址：优先显示用户名，同时金黄背景高亮
+ const isWatchWallet = addr && watchWalletSet.has(addr.toLowerCase());
+ const addrDisplay = isWatchWallet
+   ? (watchWalletMap.get(addr.toLowerCase()) || shortAddr(addr))
+   : shortAddr(addr);
+ if (isWatchWallet) {
+   div.style.cssText = 'background:rgba(255,215,0,0.18);border-left:2px solid #ffd700;border-radius:2px;';
+ }
+ div.innerHTML = `<span class="fm-time-sep">${escHtml(ts)}</span><span class="${isBuy ? 'fm-side-buy' : 'fm-side-sell'}">${isBuy ? '买' : '卖'}</span><span class="fm-mc" style="color:${isWatchWallet ? '#ffd700' : '#7a9fc0'};font-size:9px;flex-shrink:0;">${escHtml(mcStr)}</span><span class="fm-addr" title="${escHtml(addr)}" style="${isWatchWallet ? 'color:#ffd700;font-weight:700;max-width:90px;' : ''}">${escHtml(addrDisplay)}</span><span class="fm-vol">${vol} ${escHtml(sym)}</span>`;
+ panel.appendChild(div);
+ });
+}
+
+// ═══════════════════════════════════════════════════
+// Socket.io & 主逻辑
+
+// ═══════════════════════════════════════════════════
+const socket = io();
+
+let allTokens = [];
+let matchTokens = [];
+let tradeHistory = [];
+let positions = [];
+let snipedTokens = [];
+let bnbPrice = 0;
+// 监控钱包地址集合（小写），用于 fm_trade 行高亮判断
+const watchWalletSet = new Set();
+
+// ── 分页已删除，显示全部MEME ──
+
+function switchTab(name) {
+ document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+ // trade TAB 复用 tab-all 内容区，仅隐藏非狙击行
+ const showAll = (name === 'all');
+ const showTrade = (name === 'trade');
+ document.querySelectorAll('.tab-content').forEach(c => {
+   c.classList.toggle('active', c.id === (showTrade ? 'tab-all' : 'tab-' + name));
+ });
+ if (showAll || showTrade) {
+   document.querySelectorAll('#all-tbody tr').forEach(tr => {
+     tr.style.display = (showTrade && !tr.dataset.sniped) ? 'none' : '';
+   });
+ }
+}
+
+
+// 持久化数据等 init 事件后再标记，不在页面加载时预先渲染（避免计数和状态提前显示）
+document.addEventListener('DOMContentLoaded', () => {});
+
+socket.on('init', (data) => {
+ bnbPrice = data.bnbPrice || 0;
+ allTokens = data.tokens || [];
+ tradeHistory = data.tradeHistory || [];
+ positions = data.positions || [];
+
+ updateBNBPrice(bnbPrice);
+ updateWalletInfo(data.walletAddress, data.bnbBalance);
+ if (data.config) applyConfig(data.config);
+
+ // 初始化 WSS 连接状态（使用独立字段，兼容旧 wsStatus 字符串）
+ if (data.wsChain !== undefined) {
+   setBadge('chain-badge', data.wsChain);
+ } else if (data.wsStatus) {
+   setBadge('chain-badge', !data.wsStatus.includes('断开'));
+ }
+ if (data.wsFourmeme !== undefined && data.wsFourmeme !== null) {
+   setBadge('fm-badge', data.wsFourmeme);
+ }
+
+ // 初始化所有 token 的 K 线数据（如有市值则建初始蜡烛）
+ allTokens.forEach(t => {
+   if (t.marketCapUSD > 0 && t.tokenId) {
+     pushMCData(t.tokenId, t.marketCapUSD);
+   }
+   // 初始化交易缓存（如有 trades 数据）
+   if (t.trades && t.trades.length > 0 && t.tokenId) {
+     const key = t.tokenId.toLowerCase();
+     if (!fmTradesCache[key]) fmTradesCache[key] = [];
+     t.trades.forEach(trade => {
+       fmTradesCache[key].push({
+         side: trade.side === 'buy' ? 1 : 2,
+         userAddress: trade.userAddress || '',
+         volume: trade.bnbAmount || '0',
+         symbol: 'BNB',
+         txHash: trade.txHash || '',
+         marketCapUSD: trade.marketCapUSD || 0,
+         _ts: trade.time || '',
+       });
+       // 从历史交易中恢复历史最高市值
+       if (trade.marketCapUSD > 0 && t.tokenId) {
+         const state = getChartState(t.tokenId);
+         if (trade.marketCapUSD > state.allTimeMC) state.allTimeMC = trade.marketCapUSD;
+       }
+     });
+   }
+ });
+
+ rebuildMatchTokens();
+ renderAllTable();
+ renderTrades();
+ renderPositions();
+ renderSnipedTokens();
+
+ // 钱包监控初始化
+ initWatchWallets(data.watchWallets || []);
+ renderWalletTxHistory(data.walletTxHistory || []);
+});
+
+socket.on('wallet_balance', ({ address, balance }) => updateWalletInfo(address, balance));
+socket.on('token_count', ({ count }) => updateTokenCount(count));
+socket.on('bnb_price', ({ price }) => { bnbPrice = price; updateBNBPrice(price); });
+
+socket.on('ws_status', ({ status, chain, fourmeme, dex }) => {
+ // 独立字段优先（null 表示"此次事件不涉及该 badge，保持现状"）
+ if (chain !== null && chain !== undefined)     setBadge('chain-badge', chain);
+ if (fourmeme !== null && fourmeme !== undefined) setBadge('fm-badge', fourmeme);
+ // dex 状态暂时也映射到 chain-badge 颜色之外，可扩展
+ // 兜底：旧格式字符串判断
+ if (chain === undefined && status) {
+   setBadge('chain-badge', !status.includes('断开'));
+   setBadge('fm-badge', !status.includes('four.meme 重连'));
+ }
+});
+
+socket.on('new_token', (token) => {
+ allTokens.unshift(token);
+ // No cap - all tokens are kept, pagination handles display
+ prependAllRow(token);
+ updateTokenCount(allTokens.length);
+});
+
+socket.on('token_enriched', (patch) => {
+ const token = allTokens.find(t => t.tokenId === patch.tokenId) || matchTokens.find(t => t.tokenId === patch.tokenId) || snipedTokens.find(t => t.tokenId === patch.tokenId);
+ if (token) Object.assign(token, patch);
+ updateEnrichedRow(patch);
+});
+
+// ── media_race：WSS/API 竞速时间差 → 更新前端媒体列对应行 ──
+socket.on('media_race', (data) => {
+ if (!data || !data.ca) return;
+ const ca = data.ca;
+ const latencyMs = data.latency || 0;
+ const latencySec = (latencyMs / 1000).toFixed(3);
+ const text = '+' + latencySec + '秒';
+ const cls = 'media-value time diff-pos';
+
+ if (data.channel === 'WSS') {
+   const el = document.getElementById('wss-time-' + ca);
+   if (el) { el.className = cls; el.textContent = text; el.title = 'WSS延迟 ' + latencyMs + 'ms'; }
+ } else if (data.channel === 'API') {
+   const el = document.getElementById('api-time-' + ca);
+   if (el) { el.className = cls; el.textContent = text; el.title = 'API延迟 ' + latencyMs + 'ms (第' + (data.attempt || '?') + '次)'; }
+ }
+
+ // 更新竞速来源行（显示谁先到达）
+ const raceEl = document.getElementById('race-source-' + ca);
+ if (raceEl && !raceEl.dataset.resolved) {
+   const icon = data.channel === 'API' ? '🚀' : '📦';
+   const sourceColor = data.channel === 'API' ? 'color:#f59e0b;font-weight:700;' : 'color:#22c55e;font-weight:700;';
+   raceEl.style.cssText = 'font-family:var(--mono);font-size:12px;' + sourceColor;
+   raceEl.textContent = icon + ' ' + data.channel + ' 胜出 | ' + latencySec + '秒';
+   raceEl.dataset.resolved = '1';
+ }
+});
+
+socket.on('matched_token', (token) => {
+ matchTokens = matchTokens.filter(t => t.tokenId !== token.tokenId);
+ matchTokens.unshift(token);
+ updateMatchCount();
+
+ const existing = allTokens.find(t => t.tokenId === token.tokenId);
+ if (existing) {
+ Object.assign(existing, token);
+ updateRowStatus(token.tokenId);
+ }
+
+ // 策略一匹配 → 加入狙击记录
+ if (!snipedTokens.find(t => t.tokenId === token.tokenId)) {
+   snipedTokens.unshift(token);
+   prependSnipedRow(token); // 标记 all-tbody 中对应行
+   updateTradeCount();
+ }
+});
+
+// 策略二（CREATE关键词）匹配 → 直接进狙击记录
+socket.on('create_matched_token', (token) => {
+ // 同步到 allTokens
+ const existing = allTokens.find(t => t.tokenId === token.tokenId);
+ if (existing) {
+   Object.assign(existing, token);
+   updateRowStatus(token.tokenId);
+ }
+ // 加入狙击记录（去重）
+ if (!snipedTokens.find(t => t.tokenId === token.tokenId)) {
+   snipedTokens.unshift(token);
+   prependSnipedRow(token);
+   updateTradeCount();
+ }
+});
+
+socket.on('price_update', ({ tokenId, marketCapUSD }) => {
+ // 推入K线数据并重绘
+ pushMCData(tokenId, marketCapUSD);
+ // 同步更新token对象
+ [allTokens, matchTokens].forEach(arr => {
+ const t = arr.find(x => x.tokenId === tokenId);
+ if (t) t.marketCapUSD = marketCapUSD;
+ });
+ // 更新钱包监控表中对应CA行的市值列（第4列 index=3）
+ if (marketCapUSD > 0) {
+   const caLower = tokenId.toLowerCase();
+   document.querySelectorAll(`#wm-tbody tr[data-ca="${CSS.escape(caLower)}"]`).forEach(tr => {
+     const tdMC = tr.cells[3];
+     if (tdMC) {
+       const isBuy  = tr.classList.contains('wm-buy-row');
+       const isSell = tr.classList.contains('wm-sell-row');
+       const color  = isBuy ? '#00e87a' : isSell ? '#ef4444' : '#3b82f6';
+       tdMC.style.color = color;
+       tdMC.innerHTML = fmtMC(marketCapUSD);
+     }
+   });
+ }
+});
+
+socket.on('trade', (trade) => {
+ tradeHistory.unshift(trade);
+ prependTradeCard(trade);
+ updateTradeCount();
+
+ [allTokens, matchTokens, snipedTokens].forEach(arr => {
+ const t = arr.find(x => x.tokenId === trade.tokenId);
+ if (t && trade.type === 'BUY') {
+ t.bought = trade.success;
+ t.buyStatus = trade.success ? 'success' : 'failed';
+ updateRowStatus(trade.tokenId);
+ }
+ });
+});
+
+socket.on('trade_history', (history) => {
+ tradeHistory = history;
+ renderTrades();
+});
+
+// ── four.meme 实时交易流 ──
+socket.on('fm_trade', (data) => {
+ const tokenAddr = (data.tokenAddress || '').toLowerCase();
+ if (!tokenAddr) return;
+ // 来自链上的 chain_trade 也走这里（source='chain'），统一渲染
+ const isBuyVal = data.side === 1;
+ const volVal   = parseFloat(data.volume) || 0;
+ const symVal   = data.symbol || data.tokenSymbol || 'BNB';
+ console.log(`[fm_trade] ${isBuyVal ? '🟢买入' : '🔴卖出'} | CA:${tokenAddr.slice(0,10)}... | vol:${volVal.toFixed(4)} ${symVal} | user:${(data.userAddress||'').slice(0,10)}... | src:${data.source||'wss'} | ${data.time||''}`);
+ pushFmTrade(tokenAddr, data);
+ // 更新所有相关代币行的交易面板（all + match 两个tbody）
+ renderFmTradePanel(tokenAddr.toLowerCase());
+});
+
+// ── 监控钱包买入此 CA 的信号 ──
+socket.on('token_signal', (sig) => {
+ const tokenId = (sig.tokenId || '').toLowerCase();
+ if (!tokenId) return;
+
+ // 写入 token.walletSignals
+ [allTokens, matchTokens, snipedTokens].forEach(arr => {
+   const t = arr.find(x => (x.tokenId || '').toLowerCase() === tokenId);
+   if (!t) return;
+   t.walletSignals = t.walletSignals || [];
+   if (sig.txHash && t.walletSignals.some(s => s.txHash === sig.txHash)) return;
+   t.walletSignals.push({
+     time:          sig.time,
+     walletName:    sig.walletName,
+     walletAddress: sig.walletAddress,
+     bnbAmount:     sig.bnbAmount,
+     tokenAmount:   sig.tokenAmount,
+     txHash:        sig.txHash,
+     marketCapUSD:  sig.marketCapUSD,
+   });
+ });
+
+ // 重新渲染"信号"列（all + match 两张表都有）
+ const token = allTokens.find(t => (t.tokenId || '').toLowerCase() === tokenId)
+            || matchTokens.find(t => (t.tokenId || '').toLowerCase() === tokenId)
+            || snipedTokens.find(t => (t.tokenId || '').toLowerCase() === tokenId);
+ if (token) {
+   document.querySelectorAll(`#signal-${tokenId}`).forEach(el => {
+     el.innerHTML = buildSignalCell(token.walletSignals || []);
+   });
+ }
+
+ // 【仅信号列闪光】整行不闪、不高亮；仅信号 td 应用 signal-cell-match + 一次性 flash。
+ document.querySelectorAll(`#signal-${tokenId}`).forEach(td => {
+   td.classList.add('signal-cell-match');
+   td.classList.remove('signal-cell-flash');
+   void td.offsetWidth;
+   td.classList.add('signal-cell-flash');
+ });
+
+ // 【实时市值K线列同步金黄】signal触发时，mc-cell 也高亮 + 一次性 flash
+ document.querySelectorAll(`#mc-cell-${tokenId}`).forEach(td => {
+   td.classList.add('mc-cell-signal');
+   td.classList.remove('mc-cell-signal-flash');
+   void td.offsetWidth;
+   td.classList.add('mc-cell-signal-flash');
+ });
+});
+
+// ── 更新函数 ──
+function setBadge(id, online) {
+ const el = document.getElementById(id);
+ if (el) el.classList.toggle('offline', !online);
+}
+
+function updateBNBPrice(p) {
+ const el = document.getElementById('bnb-price');
+ if (!p || p <= 0) { el.textContent = '—'; return; }
+ el.textContent = '$' + parseFloat(p).toFixed(2);
+}
+function updateWalletInfo(addr, bal) {
+ const el = document.getElementById('bnb-balance');
+ if (bal && bal !== '—') el.textContent = parseFloat(bal).toFixed(4) + ' BNB';
+}
+function updateTokenCount(n) {
+ document.getElementById('token-count').textContent = n || allTokens.length;
+ document.getElementById('tab-all-count').textContent = n || allTokens.length;
+}
+function updateMatchCount() {
+ const el = document.getElementById('tab-match-count');
+ if (el) el.textContent = matchTokens.length;
+}
+function updateTradeCount() { document.getElementById('tab-trade-count').textContent = snipedTokens.length; }
+function updatePosCount() {
+ const c = positions.length;
+ const el = document.getElementById('tab-pos-count');
+ if (el) el.textContent = c;
+ document.getElementById('pos-count').textContent = c;
+}
+function applyConfig(cfg) {
+ // Config display removed (position tab merged into trade tab)
+}
+
+// ── buildMediaCell ─────────────────────────────────────────────────────────
+// 媒体列：从上到下依次为
+//   1) 媒体地址        twitterHref / twitterUrl
+//   2) 媒体地址获取时间 = mediaAddressTime - programGetTime（差值，正=红+/负=绿-）
+//   3) 媒体内容        twitterContent
+//   4) 媒体创建时间    twitterCreatedAt - programGetTime（差值，灰白色）
+//   5) 媒体内容获取时间 = twitterContentTime - programGetTime（差值，正=红+/负=绿-）
+function buildMediaCell(opts) {
+  const twitterUrl = opts.twitterUrl || '';
+  const twitterHref = opts.twitterHref || (twitterUrl ? (twitterUrl.startsWith('http') ? twitterUrl : ('https://' + twitterUrl.replace(/^\//, 'twitter.com/'))) : '');
+  // 地址列：显示完整媒体地址（twitterHref），回退到 twitterUrl
+  const twitterDisplay = opts.twitterDisplay || '';
+  const display = twitterHref || twitterUrl;
+  const programGetTime = opts.programGetTime || '';
+  const mediaAddressTime = opts.mediaAddressTime || '';
+  const content = opts.twitterContent || '';
+  const tweetCreatedAt = opts.twitterCreatedAt || '';
+  const contentGetTime = opts.twitterContentTime || '';
+
+  if (!twitterHref) {
+    return '<span class="media-empty">暂无媒体</span>';
+  }
+
+  // 差值计算（target - base） —— base = programGetTime
+  const addrDiff   = programGetTime && mediaAddressTime ? fmtTimeDiff(mediaAddressTime, programGetTime) : { text: '—', sign: null };
+  const contDiff   = programGetTime && contentGetTime   ? fmtTimeDiff(contentGetTime,   programGetTime) : { text: '—', sign: null };
+
+  const diffCls = (sign) => sign === 'pos' ? ' diff-pos' : sign === 'neg' ? ' diff-neg' : sign === 'zero' ? ' diff-zero' : '';
+
+  let html = '<div class="media-cell">';
+
+  // 1. 媒体地址
+  html += '<div class="media-row">'
+       +   '<span class="media-label">地址</span>'
+       +   '<span class="media-value addr"><a href="' + escHtml(twitterHref) + '" target="_blank" title="' + escHtml(twitterHref) + '">' + escHtml(display) + '</a></span>'
+       + '</div>';
+
+  // 2. WSS 地址获取时间（差值）
+  html += '<div class="media-row">'
+       +   '<span class="media-label">WSS获取</span>'
+       +   '<span class="media-value time' + diffCls(addrDiff.sign) + '" id="wss-time-' + escHtml(opts.tokenId || '') + '" title="' + escHtml(mediaAddressTime || '—') + '">' + escHtml(addrDiff.text) + '</span>'
+       + '</div>';
+
+  // 2b. API 地址获取时间（差值，格式与WSS一致）
+  html += '<div class="media-row">'
+       +   '<span class="media-label">API获取</span>'
+       +   '<span class="media-value time" id="api-time-' + escHtml(opts.tokenId || '') + '">—</span>'
+       + '</div>';
+
+  // 3. 媒体内容
+  if (content) {
+    html += '<div class="media-row">'
+         +   '<span class="media-label">内容</span>'
+         +   '<span class="media-value content" onclick="this.classList.toggle(\'expanded\')" title="点击展开/折叠">' + escHtml(content) + '</span>'
+         + '</div>';
+  } else {
+    html += '<div class="media-row">'
+         +   '<span class="media-label">内容</span>'
+         +   '<span class="media-value" style="color:#8b98a5;font-style:italic;">加载中...</span>'
+         + '</div>';
+  }
+
+  // 4. 媒体创建时间（推特真实创建时间，直接显示，不做差值）
+  html += '<div class="media-row">'
+       +   '<span class="media-label">创建时间</span>'
+       +   '<span class="media-value ctime">' + escHtml(tweetCreatedAt || '—') + '</span>'
+       + '</div>';
+
+  // 5. 媒体内容获取时间（差值）
+  html += '<div class="media-row">'
+       +   '<span class="media-label">内容获取</span>'
+       +   '<span class="media-value cctime' + diffCls(contDiff.sign) + '" title="' + escHtml(contentGetTime || '—') + '">' + escHtml(contDiff.text) + '</span>'
+       + '</div>';
+
+  // 6. 竞速来源（谁先到达：WSS 或 API + 耗时ms）
+  const mediaSource = opts.mediaSource || null;
+  const mediaLatencyMs = opts.mediaLatencyMs != null ? opts.mediaLatencyMs : null;
+  const sourceIcon = mediaSource === 'api' ? '🚀' : mediaSource === 'wss' ? '📦' : '';
+  const sourceLabel = mediaSource === 'api' ? 'API' : mediaSource === 'wss' ? 'WSS' : '—';
+  const latencyText = mediaLatencyMs != null ? (mediaLatencyMs / 1000).toFixed(3) + '秒' : '';
+  const sourceDisplay = mediaSource ? (sourceIcon + ' ' + sourceLabel + ' 胜出 | ' + latencyText) : '等待中...';
+  const sourceColor = mediaSource === 'api' ? 'color:#f59e0b;font-weight:700;' : mediaSource === 'wss' ? 'color:#22c55e;font-weight:700;' : 'color:var(--muted);font-style:italic;';
+  html += '<div class="media-row">'
+       +   '<span class="media-label">竞速来源</span>'
+       +   '<span class="media-value" id="race-source-' + escHtml(opts.tokenId || '') + '" style="font-family:var(--mono);font-size:12px;' + sourceColor + '">' + escHtml(sourceDisplay) + '</span>'
+       + '</div>';
+
+  html += '</div>';
+  return html;
+}
+
+// ── buildSignalCell ────────────────────────────────────────────────────────
+// 信号列：与 K线右侧交易明细格式完全一致
+// 每条记录一行：时间 | 买/卖 | 市值 | 钱包地址(监控钱包金黄显示用户名) | BNB
+function buildSignalCell(signals) {
+  if (!signals || signals.length === 0) {
+    return '<div class="signal-cell"><div class="signal-empty">—</div></div>';
+  }
+  let html = '<div class="signal-cell">';
+  // 最新在上
+  const list = signals.slice().reverse();
+  list.forEach(s => {
+    const ts       = s.time || '';
+    // 取 HH:MM:SS 部分（去除日期前缀）
+    const tsShort  = ts.replace(/^\d{4}\//, '').replace(/^\d{1,2}\/\d{1,2}\s+/, '').slice(0, 12);
+    const vol      = s.bnbAmount ? (parseFloat(s.bnbAmount) || 0).toFixed(4) : '—';
+    const wn       = s.walletName || '';
+    const addr     = s.walletAddress || '';
+    const mc       = s.marketCapUSD || 0;
+    const mcStr    = mc > 0 ? fmtMC(mc) : '—';
+    const isBuy    = s.action !== '卖出';
+    // 显示用户名（与K线一致），无名则显示缩写地址
+    const addrDisplay = wn || (addr ? addr.slice(0, 4) + '...' + addr.slice(-4) : '—');
+
+    // 单行交易条目：与 fm-trade-item 完全相同结构（金黄高亮背景）
+    html += `<div class="fm-trade-item" style="background:rgba(255,215,0,0.18);border-left:2px solid #ffd700;border-radius:2px;">`
+         + `<span class="fm-time-sep">${escHtml(tsShort)}</span>`
+         + `<span class="${isBuy ? 'fm-side-buy' : 'fm-side-sell'}">${isBuy ? '买' : '卖'}</span>`
+         + `<span class="fm-mc" style="color:#7a9fc0;font-size:9px;flex-shrink:0;">${escHtml(mcStr)}</span>`
+         + `<span class="fm-addr" style="color:#ffd700;font-weight:700;max-width:90px;" title="${escHtml(wn + ' ' + addr)}">${escHtml(addrDisplay)}</span>`
+         + `<span class="fm-vol">${vol} BNB</span>`
+         + `</div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+// ── Token Row ──
+function buildTokenRow(token, isNew = false) {
+ const tokenId = token.tokenId;
+ const twitterUrl  = token.twitterUrl || token.twitter || '';
+ const twitterHref = token.twitterHref || (twitterUrl ? (toReadableTwitter(twitterUrl).href) : '');
+ const mc = token.marketCapUSD || 0;
+ const addr = token.tokenAddress || '—';
+ const imgSrc = token.image || '';
+ const progTime = token.programGetTime || '—';
+ // 代币列主名称：仅使用 TOKEN_EVENT.data.symbol（fmSymbol），未到达时显示占位
+ const mainSymbol = token.fmSymbol || '加载中…';
+ const mainName   = token.fmName   || '';
+
+ const BLANK_IMG = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='69' height='69'><rect width='69' height='69' fill='%23111c2d' rx='12'/><text x='34' y='42' text-anchor='middle' font-size='20' fill='%234a6580'>?</text></svg>";
+
+ const tr = document.createElement('tr');
+ tr.dataset.tokenId = tokenId;
+ // 仅保留 new-row / matched-row；signal-match 已改为"只作用在信号 td"
+ tr.className = (isNew ? 'new-row ' : '')
+              + (token.matchReason ? 'matched-row ' : '');
+
+ // ── 代币列 ──
+ const tdToken = document.createElement('td');
+ tdToken.className = 'col-token';
+
+ const tokenCell = document.createElement('div');
+ tokenCell.className = 'token-cell';
+
+ // 图片 + 合约地址（图片正下方）
+ const imgWrap = document.createElement('div');
+ imgWrap.className = 'token-img-wrap';
+
+ const img = document.createElement('img');
+ img.id = `img-${tokenId}`;
+ img.className = 'token-img' + (imgSrc ? '' : ' no-img');
+ img.src = imgSrc || BLANK_IMG;
+ img.onerror = () => { img.src = BLANK_IMG; };
+ imgWrap.appendChild(img);
+
+ const addrDiv = document.createElement('div');
+ addrDiv.className = 'addr-under-img';
+ addrDiv.title = addr;
+ addrDiv.textContent = shortAddr(addr);
+ addrDiv.onclick = (e) => copyAddr(e, addr);
+ imgWrap.appendChild(addrDiv);
+
+ tokenCell.appendChild(imgWrap);
+
+ // 名称/Symbol/程序时间（加 id 用于 TOKEN_EVENT symbol 到达后局部更新）
+ const metaDiv = document.createElement('div');
+ metaDiv.className = 'token-meta';
+ metaDiv.innerHTML = `
+ <div class="token-name" id="ticker-${tokenId}" style="font-size:13px;color:#7b8ca0;font-family:var(--mono)">${escHtml(token.symbol || '—')}</div>
+ <div class="token-sub"  id="tname-${tokenId}" style="color:#7b8ca0">${escHtml(token.name || '—')}</div>
+ <div style="font-size:11px;color:#7b8ca0;margin-top:4px;font-family:var(--mono);">${escHtml(progTime)}</div>
+ <div style="font-size:12px;color:#33bbee;font-family:var(--mono);margin-top:2px;" id="name-${tokenId}">${escHtml(mainSymbol)}</div>
+ <div style="font-size:18px;font-weight:700;color:#22c55e;font-family:var(--mono);margin-top:2px;" id="elapsed-${tokenId}" data-created="${Date.now()}">0s</div>
+ `;
+ tokenCell.appendChild(metaDiv);
+ tdToken.appendChild(tokenCell);
+
+ // ── 媒体列 ──
+ const tdMedia = document.createElement('td');
+ tdMedia.className = 'col-media';
+ tdMedia.id = `media-cell-${tokenId}`;
+
+ tdMedia.innerHTML = buildMediaCell({
+   tokenId,
+   twitterUrl,
+   twitterHref,
+   twitterDisplay:    token.twitterDisplay   || '',
+   programGetTime:    token.programGetTime   || '',
+   mediaAddressTime:  token.mediaAddressTime || '',
+   twitterContent:    token.twitterContent   || '',
+   twitterCreatedAt:  token.twitterCreatedAt || '',
+   twitterContentTime:token.twitterContentTime|| '',
+   mediaSource:       token.mediaSource      || null,
+   mediaLatencyMs:    token.mediaLatencyMs != null ? token.mediaLatencyMs : null,
+ });
+
+ // ── 市值K线列 ──
+ const tdMC = document.createElement('td');
+ tdMC.className = 'col-mc';
+ tdMC.id = `mc-cell-${tokenId}`;
+ // padding handled by CSS (td.col-mc { padding: 0 })
+ tdMC.appendChild(buildMCCell(tokenId, mc));
+ // 初始化时若已有钱包信号，直接上金黄
+ if (token.walletSignals && token.walletSignals.length > 0) {
+   tdMC.classList.add('mc-cell-signal');
+ }
+
+ // ── 信号列（金黄命中效果仅限本 td）──
+ const tdSignal = document.createElement('td');
+ tdSignal.className = 'col-signal';
+ tdSignal.id = `signal-${tokenId}`;
+ tdSignal.innerHTML = buildSignalCell(token.walletSignals || []);
+ if (token.walletSignals && token.walletSignals.length > 0) {
+   tdSignal.classList.add('signal-cell-match');
+ }
+
+ // ── 购买状态列（合并原状态列数据）──
+ const tdBuy = document.createElement('td');
+ tdBuy.className = 'col-buy';
+ tdBuy.id = `buy-status-${tokenId}`;
+ tdBuy.style.fontWeight = '700';
+ tdBuy.innerHTML = buildBuyStatus(token);
+
+ tr.appendChild(tdToken);
+ tr.appendChild(tdMedia);
+ tr.appendChild(tdMC);
+ tr.appendChild(tdSignal);
+ tr.appendChild(tdBuy);
+
+ return tr;
+}
+
+function buildStatusCell(token) {
+ if (token.sold2) return `<span class="match-badge sell2-badge">✓ 已清仓</span>`;
+ if (token.sold1) return `<span class="match-badge sell1-badge">↓ 出售50%</span>`;
+ if (token.bought) return `<span class="bought-badge">🛒 已买入</span>`;
+ if (token.matchReason) return `<span class="match-badge">🎯 符合</span>`;
+ return '';
+}
+
+function buildBuyStatus(token) {
+ let statusHtml = '';
+ // 原状态列数据
+ if (token.sold2) statusHtml = '<span class="match-badge sell2-badge">✓ 已清仓</span>';
+ else if (token.sold1) statusHtml = '<span class="match-badge sell1-badge">↓ 出售50%</span>';
+ else if (token.bought) statusHtml = '<span class="bought-badge">🛒 已买入</span>';
+ else if (token.matchReason) statusHtml = '<span class="match-badge">🎯 符合</span>';
+ // 购买结果
+ if (token.buyStatus === 'success') statusHtml += ' <span class="buy-success">✅ 成功</span>';
+ else if (token.buyStatus === 'failed') statusHtml += ' <span class="buy-failed">❌ 失败</span>';
+ else if (token.buyStatus === 'filtered') statusHtml += ' <span class="buy-filtered">🚫 过滤</span>';
+ // 仅当 token 在狙击记录中时，追加策略和交易详情
+ if (snipedTokens.find(s => s.tokenId === token.tokenId)) {
+   statusHtml += buildSnipeExtra(token);
+ }
+ return statusHtml;
+}
+
+function buildSnipeExtra(token) {
+ const trade = tradeHistory.find(t => t.tokenId === token.tokenId);
+ const strategy = token._createStrategyMatched ? '策略二' : '策略一';
+ const strategyColor = token._createStrategyMatched ? '#f59e0b' : '#3b82f6';
+ const matchReason = token._createMatchReason || token.matchReason || '';
+ let html = `<div style="margin-top:6px;font-size:11px;color:${strategyColor};font-weight:700;font-family:var(--mono);">${strategy}</div>`;
+ if (matchReason) {
+   html += `<div style="font-size:10px;color:var(--muted);margin-top:2px;line-height:1.4;word-break:break-all;">${escHtml(matchReason)}</div>`;
+ }
+ if (trade) {
+   const mc = trade.marketCapAtBuy || trade.marketCapAtSell || trade.currentMarketCap || 0;
+   const mcStr = mc > 0 ? fmtMC(mc) : '—';
+   let amountStr = '—';
+   if (trade.bnbSpent) amountStr = parseFloat(trade.bnbSpent).toFixed(4);
+   else if (trade.bnbReceived) amountStr = parseFloat(trade.bnbReceived).toFixed(4);
+   let dirLabel = trade.type === 'BUY' ? '🟢 买入' : trade.type === 'SELL_1' ? '🟡 止盈1' : trade.type === 'SELL_2' ? '🟠 止盈2' : trade.type === 'SELL_3' ? '🔴 清仓' : trade.type || '—';
+   const bscLink = trade.txHash ? `https://bscscan.com/tx/${trade.txHash}` : '';
+   html += `<div style="margin-top:4px;display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:11px;">`;
+   html += `<div><span style="color:var(--muted);">方向:</span> <span style="font-weight:700;">${dirLabel}</span></div>`;
+   html += `<div><span style="color:var(--muted);">金额:</span> <span style="color:#c8dff0;font-weight:700;">${amountStr} BNB</span></div>`;
+   html += `<div><span style="color:var(--muted);">市值:</span> <span style="color:#3b82f6;font-weight:700;">${mcStr}</span></div>`;
+   html += `<div><span style="color:var(--muted);">时间:</span> <span style="color:var(--muted);">${escHtml(trade.time || '—')}</span></div>`;
+   if (bscLink) html += `<div><a class="tx-link" href="${bscLink}" target="_blank" style="display:inline;font-size:10px;">${trade.txHash.slice(0,14)}...</a></div>`;
+   html += `</div>`;
+ }
+ return html;
+}
+
+function updateEnrichedRow(patch) {
+ const tokenId = patch.tokenId;
+ if (!tokenId) return;
+
+ // 找到对应 token 对象（已在 socket.on('token_enriched') 里 Object.assign 更新过）
+ const token = allTokens.find(t => t.tokenId === tokenId)
+             || matchTokens.find(t => t.tokenId === tokenId);
+
+ // 若收到媒体地址/内容/时间字段，重建整个媒体列
+ const needsMediaRebuild = patch.twitterUrl || patch.twitterContent
+                        || patch.twitterContentTime || patch.mediaAddressTime
+                        || patch.twitterCreatedAt || patch.mediaSource;
+
+ if (needsMediaRebuild && token) {
+   document.querySelectorAll(`#media-cell-${tokenId}`).forEach(cell => {
+     cell.innerHTML = buildMediaCell({
+       tokenId,
+       twitterUrl:         token.twitterUrl || token.twitter || '',
+       twitterHref:        token.twitterHref || '',
+       twitterDisplay:     token.twitterDisplay || '',
+       programGetTime:     token.programGetTime     || '',
+       mediaAddressTime:   token.mediaAddressTime   || '',
+       twitterContent:     token.twitterContent     || '',
+       twitterCreatedAt:   token.twitterCreatedAt   || '',
+       twitterContentTime: token.twitterContentTime || '',
+       mediaSource:        token.mediaSource        || null,
+       mediaLatencyMs:     token.mediaLatencyMs != null ? token.mediaLatencyMs : null,
+     });
+   });
+ }
+
+ // 图片更新（patch.image 或 token.image）
+ const imgToUse = patch.image || (token && token.image);
+ if (imgToUse) {
+   document.querySelectorAll(`#img-${tokenId}`).forEach(el => { el.src = imgToUse; el.classList.remove('no-img'); });
+ }
+ // four.meme TOKEN_EVENT 提供的 symbol / name —— 更新代币列 fmSymbol 行（与推特/图片同时推送）
+ if (patch.fmSymbol && token) {
+   document.querySelectorAll(`#name-${tokenId}`).forEach(el => el.textContent = patch.fmSymbol);
+ }
+
+ document.querySelectorAll(`tr[data-token-id="${tokenId}"]`).forEach(tr => {
+   tr.classList.remove('enriched-flash');
+   void tr.offsetWidth;
+   tr.classList.add('enriched-flash');
+ });
+}
+
+function updateRowStatus(tokenId) {
+ const token = allTokens.find(t => t.tokenId === tokenId) || matchTokens.find(t => t.tokenId === tokenId) || snipedTokens.find(t => t.tokenId === tokenId);
+ if (!token) return;
+ document.querySelectorAll(`#buy-status-${tokenId}`).forEach(el => {
+   el.innerHTML = buildBuyStatus(token);
+ });
+}
+
+function rebuildMatchTokens() {
+ matchTokens = allTokens.filter(t => t.matchReason);
+}
+
+function renderAllTable() {
+ const tbody = document.getElementById('all-tbody');
+ tbody.innerHTML = '';
+ document.getElementById('all-empty').style.display = allTokens.length ? 'none' : 'block';
+
+ allTokens.forEach(t => {
+   const tr = buildTokenRow(t);
+   if (snipedTokens.find(s => s.tokenId === t.tokenId)) tr.dataset.sniped = '1';
+   tbody.appendChild(tr);
+ });
+ // 若当前在狙击TAB，保持非狙击行隐藏
+ const activeTab = document.querySelector('.tab.active');
+ if (activeTab && activeTab.dataset.tab === 'trade') {
+   document.querySelectorAll('#all-tbody tr').forEach(tr => {
+     tr.style.display = tr.dataset.sniped ? '' : 'none';
+   });
+ }
+}
+
+function renderMatchTable() {
+ // Removed: matched tab merged into trade tab
+}
+
+function prependAllRow(token) {
+ // 新 token 总是插入到 allTokens 前面（已在 socket.on('new_token') 中完成）
+ const tbody = document.getElementById('all-tbody');
+ document.getElementById('all-empty').style.display = 'none';
+ const newTr = buildTokenRow(token, true);
+ if (snipedTokens.find(s => s.tokenId === token.tokenId)) newTr.dataset.sniped = '1';
+ const activeTab = document.querySelector('.tab.active');
+ if (activeTab && activeTab.dataset.tab === 'trade' && !newTr.dataset.sniped) newTr.style.display = 'none';
+ tbody.insertBefore(newTr, tbody.firstChild);
+}
+
+function prependMatchRow(token) {
+ // Removed: matched tab merged into trade tab
+}
+
+// ── 狙击记录：使用与全部MEME完全相同的行结构 ──────────────────────────────
+
+/**
+ * 构建狙击记录行（复用 buildTokenRow 结构）
+ * 购买状态列内额外显示：时间/策略/方向/金额(BNB)/市值/状态/Tx
+ */
+function buildSnipeRow(token, isNew) {
+ const tr = buildTokenRow(token, isNew);
+ // 重写购买状态列，追加交易详情
+ const tdBuy = tr.querySelector(`#buy-status-${token.tokenId}`);
+ if (tdBuy) {
+   tdBuy.innerHTML = buildSnipeBuyStatus(token);
+ }
+ return tr;
+}
+
+/**
+ * 构建狙击记录购买状态列内容（包含原有状态 + 交易详情）
+ */
+function buildSnipeBuyStatus(token) {
+ // 查找最新的匹配交易记录
+ const trade = tradeHistory.find(t => t.tokenId === token.tokenId);
+
+ let statusHtml = '';
+ // 原状态行
+ if (token.sold2) statusHtml += '<span class="match-badge sell2-badge">✓ 已清仓</span>';
+ else if (token.sold1) statusHtml += '<span class="match-badge sell1-badge">↓ 出售50%</span>';
+ else if (token.bought) statusHtml += '<span class="bought-badge">🛒 已买入</span>';
+ else if (token.matchReason || token._createStrategyMatched) statusHtml += '<span class="match-badge">🎯 符合</span>';
+ if (token.buyStatus === 'success') statusHtml += ' <span class="buy-success">✅ 成功</span>';
+ else if (token.buyStatus === 'failed') statusHtml += ' <span class="buy-failed">❌ 失败</span>';
+ else if (token.buyStatus === 'filtered') statusHtml += ' <span class="buy-filtered">🚫 过滤</span>';
+
+ // 策略标签
+ const strategy = token._createStrategyMatched ? '策略二' : '策略一';
+ const strategyColor = token._createStrategyMatched ? '#f59e0b' : '#3b82f6';
+ const matchReason = token._createMatchReason || token.matchReason || '';
+
+ statusHtml += `<div style="margin-top:6px;font-size:11px;color:${strategyColor};font-weight:700;font-family:var(--mono);">${strategy}</div>`;
+ if (matchReason) {
+   statusHtml += `<div style="font-size:10px;color:var(--muted);margin-top:2px;line-height:1.4;word-break:break-all;">${escHtml(matchReason)}</div>`;
+ }
+
+ // 交易详情（如有）
+ if (trade) {
+   const mc = trade.marketCapAtBuy || trade.marketCapAtSell || trade.currentMarketCap || 0;
+   const mcStr = mc > 0 ? fmtMC(mc) : '—';
+   let amountStr = '—';
+   if (trade.bnbSpent) amountStr = parseFloat(trade.bnbSpent).toFixed(4);
+   else if (trade.bnbReceived) amountStr = parseFloat(trade.bnbReceived).toFixed(4);
+
+   let dirLabel = trade.type === 'BUY' ? '🟢 买入' : trade.type === 'SELL_1' ? '🟡 止盈1' : trade.type === 'SELL_2' ? '🟠 止盈2' : trade.type === 'SELL_3' ? '🔴 清仓' : trade.type || '—';
+   const bscLink = trade.txHash ? `https://bscscan.com/tx/${trade.txHash}` : '';
+
+   statusHtml += `<div style="margin-top:4px;display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:11px;">`;
+   statusHtml += `<div><span style="color:var(--muted);">方向:</span> <span style="font-weight:700;">${dirLabel}</span></div>`;
+   statusHtml += `<div><span style="color:var(--muted);">金额:</span> <span style="color:#c8dff0;font-weight:700;">${amountStr} BNB</span></div>`;
+   statusHtml += `<div><span style="color:var(--muted);">市值:</span> <span style="color:#3b82f6;font-weight:700;">${mcStr}</span></div>`;
+   statusHtml += `<div><span style="color:var(--muted);">时间:</span> <span style="color:var(--muted);">${escHtml(trade.time || '—')}</span></div>`;
+   if (bscLink) {
+     statusHtml += `<div><a class="tx-link" href="${bscLink}" target="_blank" style="display:inline;font-size:10px;">${trade.txHash.slice(0,14)}...</a></div>`;
+   }
+   statusHtml += `</div>`;
+ }
+
+ return statusHtml;
+}
+
+/** 狙击记录：标记 all-tbody 中对应行（data-sniped），不再维护独立表格 */
+function renderSnipedTokens() {
+ snipedTokens.forEach(t => markSnipedRow(t.tokenId));
+ updateTradeCount();
+}
+
+/** 标记 all-tbody 中对应行为狙击行 */
+function markSnipedRow(tokenId) {
+ const tr = document.querySelector(`#all-tbody tr[data-token-id="${tokenId}"]`);
+ if (tr) tr.dataset.sniped = '1';
+}
+
+/** 新增狙击行：标记已有行；若行尚未渲染（分页不在当前页）则等渲染时自然带标记 */
+function prependSnipedRow(token) {
+ markSnipedRow(token.tokenId);
+}
+
+function renderTrades() {
+ renderSnipedTokens();
+}
+
+function prependTradeCard(trade) {
+ const tokenId = trade.tokenId || trade.tokenAddress;
+ if (!tokenId) return;
+ const token = snipedTokens.find(t => t.tokenId === tokenId);
+ if (token) {
+   if (trade.type === 'BUY') { token.bought = trade.success; token.buyStatus = trade.success ? 'success' : 'failed'; }
+   updateRowStatus(tokenId);
+ }
+}
+
+/** 把 position 对象转换为类 trade 格式用于显示 */
+function positionToTrade(pos) {
+ return {
+   type: 'POSITION',
+   strategy: pos.strategy || 'media',
+   tokenId: pos.tokenId,
+   tokenAddress: pos.tokenAddress,
+   symbol: pos.symbol,
+   name: pos.name,
+   image: pos.image,
+   time: pos.buyTime ? new Date(pos.buyTime).toLocaleString('zh-CN', { hour12: false }) : '—',
+   bnbSpent: pos.bnbSpent,
+   txHash: pos.buyTxHash,
+   success: true,
+   marketCapAtBuy: pos.marketCapAtBuy || 0,
+   currentMarketCap: pos.currentMarketCap || 0,
+   sold1: pos.sold1,
+   sold2: pos.sold2,
+   sold3: pos.sold3,
+   _isPosition: true,
+ };
+}
+
+function buildTradeRow(trade, isNew) {
+ const BLANK_IMG = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><rect width='40' height='40' fill='%23111c2d' rx='8'/><text x='20' y='26' text-anchor='middle' font-size='14' fill='%234a6580'>?</text></svg>";
+ const tokenAddr = trade.tokenAddress || trade.tokenId || '';
+ const imgSrc = trade.image || '';
+ const isBuy = trade.type === 'BUY' || trade.type === 'POSITION';
+ const strategy = trade.strategy || 'media';
+ // 策略列：显示具体匹配到的关键词
+ let strategyLabel, strategyColor;
+ if (strategy === 'create') {
+   // 从 matchReason 提取关键词："关键词[xxx] | ..."
+   const kwMatch = (trade.matchReason || '').match(/关键词\[([^\]]+)\]/);
+   const kw = kwMatch ? kwMatch[1] : '—';
+   strategyLabel = '🏗️ ' + kw;
+   strategyColor = '#f59e0b';
+ } else {
+   // 四条件策略：从 matchReason 提取媒体命中账号
+   const accMatch = (trade.matchReason || '').match(/媒体命中\[([^\]]+)\]/);
+   const acc = accMatch ? accMatch[1] : '—';
+   strategyLabel = '📡 ' + acc;
+   strategyColor = '#3b82f6';
+ }
+
+ // 方向标签
+ let dirLabel, dirColor;
+ if (trade.type === 'POSITION') { dirLabel = '📦 持仓中'; dirColor = '#3b82f6'; }
+ else if (trade.type === 'BUY') { dirLabel = '🟢 买入'; dirColor = '#00ff88'; }
+ else if (trade.type === 'SELL_1') { dirLabel = '🟡 止盈1'; dirColor = '#f59e0b'; }
+ else if (trade.type === 'SELL_2') { dirLabel = '🟠 止盈2'; dirColor = '#f97316'; }
+ else if (trade.type === 'SELL_3') { dirLabel = '🔴 清仓'; dirColor = '#ef4444'; }
+ else { dirLabel = trade.type || '—'; dirColor = '#7b8ca0'; }
+
+ // 金额
+ let amountStr = '—';
+ if (trade.bnbSpent) amountStr = parseFloat(trade.bnbSpent).toFixed(4);
+ else if (trade.bnbReceived) amountStr = parseFloat(trade.bnbReceived).toFixed(4);
+
+ // 市值
+ const mc = trade.marketCapAtBuy || trade.marketCapAtSell || trade.currentMarketCap || 0;
+ const mcStr = mc > 0 ? fmtMC(mc) : '—';
+
+ // 状态
+ let statusHtml;
+ if (trade._isPosition) {
+   const stages = [];
+   if (trade.sold1) stages.push('<span class="pos-stage done">1✓</span>');
+   if (trade.sold2) stages.push('<span class="pos-stage done">2✓</span>');
+   if (trade.sold3) stages.push('<span class="pos-stage done">3✓</span>');
+   statusHtml = stages.length > 0 ? stages.join('') : '<span style="color:#3b82f6;font-weight:700">持仓中</span>';
+ } else if (trade.success) {
+   statusHtml = '<span class="buy-success">✅ 成功</span>';
+   if (trade.pending) statusHtml += '<span style="color:var(--muted);font-size:10px;margin-left:4px">⏳</span>';
+ } else {
+   statusHtml = '<span class="buy-failed">❌ 失败</span>';
+ }
+
+ const bscLink = trade.txHash ? `https://bscscan.com/tx/${trade.txHash}` : '';
+
+ const tr = document.createElement('tr');
+ if (trade._isPosition) tr.dataset.isPosition = '1';
+ tr.dataset.tokenId = tokenAddr;
+ if (isNew) tr.className = 'new-row';
+ // 行边框色
+ const leftBorder = trade._isPosition ? '3px solid #3b82f6'
+                  : trade.type === 'BUY' ? '3px solid #22c55e'
+                  : trade.type.startsWith('SELL') ? '3px solid #ef4444' : 'none';
+ tr.style.borderLeft = leftBorder;
+
+ // 1. 代币列（图片+CA+名称）
+ const tdToken = document.createElement('td');
+ tdToken.className = 'col-token';
+ tdToken.innerHTML = `
+   <div class="token-cell">
+     <div class="token-img-wrap">
+       <img class="token-img${imgSrc ? '' : ' no-img'}" src="${imgSrc || BLANK_IMG}" style="width:40px;height:40px;border-radius:8px" onerror="this.src='${BLANK_IMG}'">
+       <div class="addr-under-img" title="${escHtml(tokenAddr)}" onclick="copyAddr(event,'${escHtml(tokenAddr)}')">${shortAddr(tokenAddr)}</div>
+     </div>
+     <div class="token-meta">
+       <div class="token-name" style="font-size:13px">${escHtml(trade.symbol || '—')}</div>
+       <div class="token-sub">${escHtml(trade.name || '')}</div>
+     </div>
+   </div>
+ `;
+
+ // 2. 策略
+ const tdStrategy = document.createElement('td');
+ tdStrategy.style.cssText = 'text-align:center;vertical-align:middle;';
+ tdStrategy.innerHTML = `<span style="color:${strategyColor};font-weight:700;font-size:12px">${strategyLabel}</span>`;
+
+ // 3. 方向
+ const tdDir = document.createElement('td');
+ tdDir.style.cssText = 'text-align:center;vertical-align:middle;';
+ tdDir.innerHTML = `<span style="color:${dirColor};font-weight:700;font-size:13px">${dirLabel}</span>`;
+
+ // 4. 金额
+ const tdAmount = document.createElement('td');
+ tdAmount.style.cssText = 'text-align:center;vertical-align:middle;font-family:var(--mono);font-weight:700;color:#c8dff0';
+ tdAmount.textContent = amountStr;
+
+ // 5. 市值
+ const tdMC = document.createElement('td');
+ tdMC.style.cssText = 'text-align:center;vertical-align:middle;font-family:var(--mono);font-weight:700;color:#3b82f6';
+ tdMC.textContent = mcStr;
+
+ // 6. 状态
+ const tdStatus = document.createElement('td');
+ tdStatus.style.cssText = 'text-align:center;vertical-align:middle;';
+ tdStatus.innerHTML = statusHtml;
+
+ // 7. 时间
+ const tdTime = document.createElement('td');
+ tdTime.style.cssText = 'text-align:center;vertical-align:middle;font-family:var(--mono);font-size:11px;color:var(--muted)';
+ tdTime.textContent = trade.time || '—';
+
+ // 8. Tx
+ const tdTx = document.createElement('td');
+ tdTx.style.cssText = 'text-align:center;vertical-align:middle;';
+ if (bscLink) {
+   tdTx.innerHTML = `<a class="tx-link" href="${bscLink}" target="_blank" style="display:inline;font-size:10px">${trade.txHash.slice(0, 16)}...</a>`;
+ } else {
+   tdTx.innerHTML = '<span style="color:var(--muted)">—</span>';
+ }
+
+ tr.appendChild(tdToken);
+ tr.appendChild(tdStrategy);
+ tr.appendChild(tdDir);
+ tr.appendChild(tdAmount);
+ tr.appendChild(tdMC);
+ tr.appendChild(tdStatus);
+ tr.appendChild(tdTime);
+ tr.appendChild(tdTx);
+
+ return tr;
+}
+
+function renderPositions() {
+ updatePosCount();
+ // 持仓状态变化时刷新狙击记录行（更新购买状态列）
+ renderSnipedTokens();
+}
+
+// ── Utils ──
+function fmtMC(usd) {
+ if (!usd || usd <= 0) return '—';
+ return usd >= 1000000 ? (usd / 1000000).toFixed(2) + 'M' : (usd / 1000).toFixed(2) + 'K';
+}
+function shortAddr(addr) {
+ if (!addr || addr === '—') return '—';
+ return addr.slice(0, 4) + '...' + addr.slice(-4);
+}
+function escHtml(s) {
+ if (!s) return '';
+ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function copyAddr(event, addr) {
+ if (!addr || addr === '—') return;
+ navigator.clipboard.writeText(addr).catch(() => {});
+ const tip = document.getElementById('copied-tip');
+ tip.style.left = (event.clientX + 10) + 'px';
+ tip.style.top = (event.clientY - 20) + 'px';
+ tip.style.opacity = '1';
+ setTimeout(() => tip.style.opacity = '0', 1200);
+}
+
+// ── 窗口resize时重绘所有canvas ──
+window.addEventListener('resize', () => {
+ document.querySelectorAll('canvas[data-token-id]').forEach(canvas => {
+ const tokenId = canvas.dataset.tokenId;
+ if (tokenId) drawChart(canvas, tokenId);
+ });
+});
+
+// ═══════════════════════════════════════════════════
+// 钱包监控 TAB 逻辑
+// ═══════════════════════════════════════════════════
+
+let wmTxCount = 0;
+let wmPanelOpen = false;
+
+/** 切换钱包列表面板展开/折叠 */
+function toggleWmPanel() {
+ wmPanelOpen = !wmPanelOpen;
+ const panel = document.getElementById('wm-wallet-panel');
+ const hint  = document.getElementById('wm-toggle-hint');
+ if (panel) panel.classList.toggle('open', wmPanelOpen);
+ if (hint)  hint.textContent = wmPanelOpen ? '▲ 收起列表' : '▼ 展开查看';
+}
+
+/** 初始化监控钱包列表（网格卡片形式） */
+function initWatchWallets(wallets) {
+ const grid    = document.getElementById('wm-wallet-list');
+ const countEl = document.getElementById('wm-wallet-count');
+ if (!grid) return;
+ grid.innerHTML = '';
+ if (countEl) countEl.textContent = wallets ? wallets.length : 0;
+ // 填充全局钱包地址集合 & 用户名 Map
+ watchWalletSet.clear();
+ watchWalletMap.clear();
+ if (wallets) wallets.forEach(w => {
+   if (w.address) {
+     watchWalletSet.add(w.address.toLowerCase());
+     watchWalletMap.set(w.address.toLowerCase(), w.name || shortAddr(w.address));
+   }
+ });
+ if (!wallets || wallets.length === 0) {
+   grid.innerHTML = '<span style="color:var(--muted);font-size:11px;font-family:var(--mono);">未配置监控钱包</span>';
+   return;
+ }
+ wallets.forEach(w => {
+   const card = document.createElement('div');
+   card.className = 'wm-wallet-card';
+   card.title = w.address;
+   card.onclick = (e) => copyAddr(e, w.address);
+   card.innerHTML =
+     '<div class="wm-card-dot"></div>'
+   + `<span class="wm-username" title="${escHtml(w.name)}"><span class="wm-username-gear">${WM_GEAR_ICON}</span><span class="wm-username-text">${escHtml(w.name)}</span></span>`
+   + `<span class="wm-card-addr">${shortAddr(w.address)}</span>`;
+   grid.appendChild(card);
+ });
+}
+
+/** 渲染历史记录（init 时） */
+function renderWalletTxHistory(txList) {
+ if (!txList || txList.length === 0) return;
+ const tbody = document.getElementById('wm-tbody');
+ document.getElementById('wm-empty').style.display = 'none';
+ txList.forEach(rec => {
+   if (rec.action === '授权卖出') return;
+   tbody.appendChild(buildWmRow(rec, false));
+ });
+ wmTxCount = tbody.rows.length;
+ updateWmCount();
+}
+
+/** 新交易到来时头部插入 */
+function prependWmRow(rec) {
+ if (rec.action === '授权卖出') return;
+ const tbody = document.getElementById('wm-tbody');
+ document.getElementById('wm-empty').style.display = 'none';
+ tbody.insertBefore(buildWmRow(rec, true), tbody.firstChild);
+ while (tbody.rows.length > 500) tbody.deleteRow(tbody.rows.length - 1);
+ wmTxCount = tbody.rows.length;
+ updateWmCount();
+}
+
+function updateWmCount() {
+ const el = document.getElementById('tab-wallet-count');
+ if (el) el.textContent = wmTxCount;
+}
+
+/** 构建一行 DOM — 7列：时间 / 钱包 / 操作 / 市值 / CA / 金额(BNB) / GAS */
+function buildWmRow(rec, isNew) {
+ const isBuy   = rec.action === '买入';
+ const isSell  = rec.action === '卖出';
+ const tokenCA = (rec.tokenAddress || rec.ca || '').toLowerCase();
+ const txHash  = rec.txHash || '';
+ // 行颜色：买入=绿，卖出=红，其他=默认
+ const rowColor = isBuy ? '#00e87a' : isSell ? '#ef4444' : null;
+ const rowBg    = isBuy ? 'rgba(0,232,122,.06)' : isSell ? 'rgba(239,68,68,.06)' : 'transparent';
+ const C  = 'text-align:center;vertical-align:middle;padding:8px;';
+ const Cc = rowColor ? `${C}color:${rowColor};` : C;
+
+ const tr = document.createElement('tr');
+ tr.className = (isNew ? 'wm-new-row ' : '') + (isBuy ? 'wm-buy-row' : isSell ? 'wm-sell-row' : '');
+ tr.style.background = rowBg;
+ if (txHash)  tr.dataset.txhash = txHash;
+ if (tokenCA) tr.dataset.ca     = tokenCA;
+
+ // 1. 时间
+ const tdTime = document.createElement('td');
+ tdTime.style.cssText = Cc + 'font-family:var(--mono);font-size:11px;';
+ tdTime.textContent = rec.time || '—';
+
+ // 2. 钱包（名称 + 地址）
+ const tdWallet = document.createElement('td');
+ tdWallet.style.cssText = C;
+ const addrColor = rowColor ? rowColor + 'bb' : 'var(--muted)';
+ tdWallet.innerHTML =
+   `<div class="wm-username"><span class="wm-username-gear">${WM_GEAR_ICON}</span><span class="wm-username-text">${escHtml(rec.walletName || '—')}</span></div>`
+ + `<div style="font-family:var(--mono);font-size:9px;color:${addrColor};cursor:pointer;margin-top:2px"`
+ + ` title="${escHtml(rec.walletAddress || '')}" onclick="copyAddr(event,'${escHtml(rec.walletAddress || '')}')">`
+ + `${shortAddr(rec.walletAddress || '')}</div>`;
+
+ // 3. 操作
+ const tdAction = document.createElement('td');
+ tdAction.style.cssText = C;
+ if (isBuy)       tdAction.innerHTML = `<span style="color:#00e87a;font-weight:700;font-size:13px">买入</span>`;
+ else if (isSell) tdAction.innerHTML = `<span style="color:#ef4444;font-weight:700;font-size:13px">卖出</span>`;
+ else             tdAction.innerHTML = `<span style="color:var(--muted);font-size:11px">—</span>`;
+
+ // 4. 市值
+ const tdMC = document.createElement('td');
+ tdMC.style.cssText = Cc + 'font-family:var(--mono);font-size:12px;font-weight:700;';
+ const mc = rec.marketCapUSD || 0;
+ tdMC.innerHTML = mc > 0 ? fmtMC(mc) : `<span style="opacity:.5">—</span>`;
+
+ // 5. CA（点击复制，显示前4位+...+后4位）
+ const tdCA = document.createElement('td');
+ tdCA.style.cssText = C;
+ if (tokenCA) {
+   const caColor = rowColor || '#c8dff0';
+   const caShort = tokenCA.length > 8 ? tokenCA.slice(0, 4) + '...' + tokenCA.slice(-4) : tokenCA;
+   tdCA.innerHTML =
+     `<div style="font-family:var(--mono);font-size:11px;color:${caColor};cursor:pointer;white-space:nowrap;"`
+   + ` title="${escHtml(tokenCA)}" onclick="copyAddr(event,'${escHtml(tokenCA)}')">`
+   + `${escHtml(caShort)}</div>`;
+ } else {
+   tdCA.innerHTML = `<span style="opacity:.5">—</span>`;
+ }
+
+ // 6. 金额(BNB)
+ const tdBnb = document.createElement('td');
+ tdBnb.style.cssText = Cc + 'font-family:var(--mono);font-size:12px;font-weight:700;';
+ const bnbRaw = rec.bnbAmount !== undefined && rec.bnbAmount !== null ? rec.bnbAmount : (rec.bnb || '');
+ const bnbVal = parseFloat(bnbRaw);
+ if (!isNaN(bnbVal) && bnbVal > 0) {
+   tdBnb.id = `bnb-${txHash}`;
+   tdBnb.textContent = bnbVal.toFixed(4);
+ } else {
+   tdBnb.innerHTML = `<span style="opacity:.5">—</span>`;
+ }
+
+ // 7. GAS（固定值，不再异步查询）
+ const tdGas = document.createElement('td');
+ tdGas.style.cssText = Cc + 'font-family:var(--mono);font-size:11px;';
+ tdGas.textContent = rec.gasPrice || '—';
+
+ tr.appendChild(tdTime);
+ tr.appendChild(tdWallet);
+ tr.appendChild(tdAction);
+ tr.appendChild(tdMC);
+ tr.appendChild(tdCA);
+ tr.appendChild(tdBnb);
+ tr.appendChild(tdGas);
+ return tr;
+}
+
+// ── Socket 事件：新钱包交易 ──
+socket.on('wallet_tx', (rec) => {
+ // 补充市值：若 rec.marketCapUSD 为 0，尝试从 allTokens / matchTokens 获取
+ if (!(rec.marketCapUSD > 0) && rec.tokenAddress) {
+   const caLow = rec.tokenAddress.toLowerCase();
+   const found = allTokens.find(t => (t.tokenId || '').toLowerCase() === caLow)
+              || matchTokens.find(t => (t.tokenId || '').toLowerCase() === caLow);
+   if (found && found.marketCapUSD > 0) rec.marketCapUSD = found.marketCapUSD;
+ }
+ prependWmRow(rec);
+
+ // ── 信号列金黄高亮（买入 & 卖出都触发）──
+ const tokenId = (rec.tokenAddress || '').toLowerCase();
+ if (!tokenId) return;
+
+ // 更新 token.walletSignals（买入和卖出都记录到信号列）
+ [allTokens, matchTokens, snipedTokens].forEach(arr => {
+   const t = arr.find(x => (x.tokenId || '').toLowerCase() === tokenId);
+   if (!t) return;
+   t.walletSignals = t.walletSignals || [];
+   if (rec.txHash && t.walletSignals.some(s => s.txHash === rec.txHash)) return;
+   t.walletSignals.push({
+     time:          rec.time,
+     walletName:    rec.walletName,
+     walletAddress: rec.walletAddress,
+     bnbAmount:     rec.bnbAmount,
+     tokenAmount:   rec.tokenAmount,
+     txHash:        rec.txHash,
+     marketCapUSD:  rec.marketCapUSD,
+     action:        rec.action,
+   });
+ });
+
+ // 重建信号列内容
+ const token = allTokens.find(t => (t.tokenId || '').toLowerCase() === tokenId)
+            || matchTokens.find(t => (t.tokenId || '').toLowerCase() === tokenId)
+            || snipedTokens.find(t => (t.tokenId || '').toLowerCase() === tokenId);
+ if (token) {
+   document.querySelectorAll(`#signal-${tokenId}`).forEach(el => {
+     el.innerHTML = buildSignalCell(token.walletSignals || []);
+   });
+ }
+
+ // 信号列金黄闪烁
+ document.querySelectorAll(`#signal-${tokenId}`).forEach(td => {
+   td.classList.add('signal-cell-match');
+   td.classList.remove('signal-cell-flash');
+   void td.offsetWidth;
+   td.classList.add('signal-cell-flash');
+ });
+
+ // K线交易明细列金黄闪烁（仅列级，不整行）
+ document.querySelectorAll(`#mc-cell-${tokenId}`).forEach(td => {
+   td.classList.add('mc-cell-signal');
+   td.classList.remove('mc-cell-signal-flash');
+   void td.offsetWidth;
+   td.classList.add('mc-cell-signal-flash');
+ });
+
+ // 重渲交易明细面板（让新增的监控钱包行立即出现金黄背景）
+ renderFmTradePanel((tokenId || '').toLowerCase());
+});
+
+// ── Socket 事件：钱包监控连接状态 ──
+socket.on('wallet_monitor_status', ({ status }) => {
+ const badge = document.getElementById('wm-status-badge');
+ if (!badge) return;
+ if (status === 'connected') {
+   badge.classList.remove('offline');
+   badge.querySelector('span').textContent = '链上监控 ✅';
+ } else {
+   badge.classList.add('offline');
+   badge.querySelector('span').textContent = '链上监控 重连中';
+ }
+});
+
+// ── 每秒更新所有代币的已过秒数计时器 ──
+setInterval(() => {
+ const els = document.querySelectorAll('[id^="elapsed-"]');
+ const now = Date.now();
+ els.forEach(el => {
+   const created = parseInt(el.dataset.created) || now;
+   const sec = Math.floor((now - created) / 1000);
+   if (sec >= 60) {
+     const m = Math.floor(sec / 60);
+     const s = sec % 60;
+     el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+   } else {
+     el.textContent = sec + 's';
+   }
+ });
+}, 1000);
+
+</script>
+</body>
+</html>
